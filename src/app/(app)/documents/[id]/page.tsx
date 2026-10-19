@@ -1,0 +1,138 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { ConfirmFieldButton, FieldsForm, ReviewPanel } from "@/components/forms/review-forms";
+import { DocumentStatusBadge, ExtractionBadge } from "@/components/status";
+import { ButtonLink } from "@/components/ui/button";
+import { Card, CardHeader, DescriptionList, Notice, PageHeader } from "@/components/ui/surface";
+import { can } from "@/lib/authz";
+import { requireTenant } from "@/lib/auth/session";
+import { NotFoundError } from "@/lib/errors";
+import { formatBytes, formatDateTime } from "@/lib/format";
+import { approvalBlockers, getDocument, LOW_CONFIDENCE } from "@/server/documents";
+
+export const metadata = { title: "Review document" };
+
+export default async function DocumentReviewPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ uploaded?: string }> }) {
+  const [{ id }, sp] = await Promise.all([params, searchParams]);
+  const { ctx } = await requireTenant();
+  const doc = await getDocument(ctx, id).catch((e) => {
+    if (e instanceof NotFoundError) notFound();
+    throw e;
+  });
+  const blockers = approvalBlockers(doc);
+  const editable = can(ctx.role, "documents:edit_fields") && doc.status !== "approved";
+  const toConfirm = doc.fields.filter((f) => doc.values[f.key]?.value && doc.values[f.key].requiresConfirmation);
+  const fileUrl = `/api/documents/${doc.id}/file`;
+  const isPdf = doc.mimeType === "application/pdf";
+  const isBrowserImage = doc.mimeType === "image/png" || doc.mimeType === "image/jpeg";
+
+  return (
+    <>
+      <PageHeader
+        eyebrow={
+          <Link href={`/shipments/${doc.shipmentId}`} className="hover:text-ink">
+            ← {doc.shipmentReference}
+          </Link>
+        }
+        title={doc.typeName}
+        description={
+          <span className="inline-flex flex-wrap items-center gap-2">
+            <DocumentStatusBadge status={doc.status} />
+            <ExtractionBadge status={doc.extractionStatus} />
+            <span className="truncate">{doc.originalFilename}</span>
+          </span>
+        }
+        actions={
+          <ButtonLink href={`${fileUrl}?mode=download`} variant="secondary" prefetch={false}>
+            Download
+          </ButtonLink>
+        }
+      />
+
+      {sp.uploaded && <Notice tone="success" className="mb-4" title="Uploaded securely">The file passed type and content checks and is stored privately.</Notice>}
+      {doc.extractionStatus === "not_configured" && (
+        <Notice tone="info" className="mb-4" title="AI extraction not configured">
+          No AI/OCR provider credentials are set, so nothing was extracted automatically. Enter the values from the document below.
+        </Notice>
+      )}
+      {doc.extractionStatus === "failed" && (
+        <Notice tone="error" className="mb-4" title="Extraction failed">
+          {doc.extractionError ?? "The provider returned an error."} Enter values manually.
+        </Notice>
+      )}
+      {doc.status === "rejected" && doc.reviewNote && (
+        <Notice tone="error" className="mb-4" title={`Rejected${doc.reviewedBy ? ` by ${doc.reviewedBy}` : ""}`}>
+          {doc.reviewNote}
+        </Notice>
+      )}
+      {doc.status === "approved" && (
+        <Notice tone="success" className="mb-4" title={`Approved${doc.reviewedBy ? ` by ${doc.reviewedBy}` : ""}`}>
+          {formatDateTime(doc.reviewedAt)} · Values are locked. Reopen to make changes.
+        </Notice>
+      )}
+
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <Card className="overflow-hidden">
+          <CardHeader title="Preview" description="Opened through a 60-second signed link. Each view is recorded in the audit log." />
+          <div className="bg-bg/60">
+            {isPdf ? (
+              <iframe src={`${fileUrl}?mode=view`} title={`Preview of ${doc.originalFilename}`} className="h-[70vh] min-h-96 w-full" />
+            ) : isBrowserImage ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={`${fileUrl}?mode=view`} alt={`Preview of ${doc.originalFilename}`} className="mx-auto max-h-[70vh] object-contain" />
+            ) : (
+              <p className="p-8 text-center text-sm text-muted">This file type can’t be previewed in the browser. Use Download.</p>
+            )}
+          </div>
+        </Card>
+
+        <div className="space-y-6">
+          {toConfirm.length > 0 && editable && (
+            <Card>
+              <CardHeader title="Values to confirm" description="Machine-read values must be checked by a person before approval." />
+              <ul className="divide-y divide-line">
+                {toConfirm.map((f) => (
+                  <li key={f.key} className="flex items-center justify-between gap-3 px-5 py-3">
+                    <div className="min-w-0">
+                      <p className="text-xs text-muted">{f.label}</p>
+                      <p className="truncate text-sm font-medium">{doc.values[f.key].value}</p>
+                    </div>
+                    <ConfirmFieldButton documentId={doc.id} fieldKey={f.key} />
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+
+          <Card>
+            <CardHeader title="Document values" description={editable ? "Edit any value; values you type are recorded as entered by you." : undefined} />
+            <div className="p-5">
+              <FieldsForm documentId={doc.id} fields={doc.fields} values={doc.values} editable={editable} lowConfidence={LOW_CONFIDENCE} />
+            </div>
+          </Card>
+
+          <Card>
+            <CardHeader title="Review" />
+            <div className="p-5">
+              <ReviewPanel documentId={doc.id} status={doc.status} blockers={blockers} canApprove={can(ctx.role, "documents:approve")} />
+            </div>
+          </Card>
+
+          <Card>
+            <CardHeader title="File details" />
+            <div className="p-5">
+              <DescriptionList
+                items={[
+                  { label: "Uploaded", value: `${formatDateTime(doc.createdAt)}${doc.uploadedBy ? ` by ${doc.uploadedBy}` : ""}` },
+                  { label: "Size / type", value: `${formatBytes(doc.sizeBytes)} · ${doc.mimeType}` },
+                  { label: "SHA-256", value: <span className="break-all font-mono text-xs">{doc.sha256}</span> },
+                  { label: "Extraction provider", value: doc.extractionProvider },
+                ]}
+              />
+            </div>
+          </Card>
+        </div>
+      </div>
+    </>
+  );
+}
