@@ -10,6 +10,7 @@ import { ForbiddenError, LimitExceededError, NotFoundError, ValidationError } fr
 import { setTrackingProvidersForTesting } from "@/lib/tracking/registry";
 import { mapTraqoShipment, TraqoProvider } from "@/lib/tracking/traqo";
 import type { ReferenceType, TrackingProvider, TrackOutcome } from "@/lib/tracking/types";
+import { containerCheckDigit, containerNumberProblem } from "@/lib/tracking/container";
 import { verifyTraqoSignature } from "@/lib/tracking/webhook";
 import { createShipment, getShipment, listShipmentEvents } from "@/server/shipments";
 import { listTrackings, refreshTracking, startTracking, stopTracking, syncReference } from "@/server/tracking";
@@ -53,6 +54,12 @@ class FakeProvider implements TrackingProvider {
     return this.next(ref);
   }
 }
+
+/** A valid ISO 6346 number for the given owner code and serial. */
+const box = (serial: number, owner = "MSCU") => {
+  const first = `${owner}${String(serial).padStart(6, "0")}`;
+  return `${first}${containerCheckDigit(first)}`;
+};
 
 let fake: FakeProvider;
 beforeEach(() => {
@@ -175,7 +182,17 @@ describe("starting and refreshing live tracking", () => {
     expect(await listShipmentEvents(ctx, id).then((e) => e.filter((x) => x.source === "traqo"))).toHaveLength(0);
   });
 
+  it("checks the ISO 6346 check digit before calling the provider", () => {
+    expect(containerNumberProblem("CSQU3054383")).toBeNull(); // ISO 6346 reference example
+    expect(containerNumberProblem("MSCU1234566")).toBeNull();
+    expect(containerNumberProblem("MSCU7531592")).toMatch(/Did you mean MSCU7531598\?/);
+    expect(containerNumberProblem("MSCA1234566")).toMatch(/U, J or Z/);
+  });
+
   it("validates references and rejects duplicates", async () => {
+    const { ctx: c0 } = await makeOrg();
+    await expect(startTracking(c0, await shipmentFor(c0), { reference: "MSCU7531592" })).rejects.toBeInstanceOf(ValidationError);
+    expect(fake.calls).toEqual([]);
     const { ctx } = await makeOrg();
     const id = await shipmentFor(ctx);
     await expect(startTracking(ctx, id, { reference: "ABC" })).rejects.toBeInstanceOf(ValidationError);
@@ -186,9 +203,9 @@ describe("starting and refreshing live tracking", () => {
   it("enforces the plan's monthly tracking limit before calling the provider", async () => {
     const { ctx } = await makeOrg(); // trial: 5
     const id = await shipmentFor(ctx);
-    for (let i = 0; i < 5; i++) await startTracking(ctx, id, { reference: `MSCU123456${i}` });
+    for (let i = 0; i < 5; i++) await startTracking(ctx, id, { reference: box(500000 + i) });
     const calls = fake.calls.length;
-    await expect(startTracking(ctx, id, { reference: "MSCU1234569" })).rejects.toBeInstanceOf(LimitExceededError);
+    await expect(startTracking(ctx, id, { reference: box(600000) })).rejects.toBeInstanceOf(LimitExceededError);
     expect(fake.calls.length).toBe(calls);
   });
 
@@ -211,7 +228,7 @@ describe("tracking access control", () => {
     expect(await listTrackings(b.ctx, id)).toEqual([]);
     await expect(refreshTracking(b.ctx, trackingId)).rejects.toBeInstanceOf(NotFoundError);
     await expect(stopTracking(b.ctx, trackingId)).rejects.toBeInstanceOf(NotFoundError);
-    await expect(startTracking(b.ctx, id, { reference: "MSCU7654321" })).rejects.toBeInstanceOf(NotFoundError);
+    await expect(startTracking(b.ctx, id, { reference: box(765432) })).rejects.toBeInstanceOf(NotFoundError);
     const rows = await systemTx((tx) => tx.query(`SELECT count(*)::int AS n FROM container_trackings WHERE org_id = $1`, [b.ctx.orgId]));
     expect(rows.rows[0].n).toBe(0);
   });
@@ -222,7 +239,7 @@ describe("tracking access control", () => {
     await startTracking(ctx, id, { reference: "MSCU1234566" });
     const viewer = await addMember(org.id, "viewer");
     expect(await listTrackings(viewer.ctx, id)).toHaveLength(1);
-    await expect(startTracking(viewer.ctx, id, { reference: "MSCU7654321" })).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(startTracking(viewer.ctx, id, { reference: box(765432) })).rejects.toBeInstanceOf(ForbiddenError);
   });
 });
 
@@ -258,7 +275,7 @@ describe("Traqo webhook and scheduled sync", () => {
   it("re-reads the provider for every organization tracking a pushed reference", async () => {
     const a = await makeOrg();
     const b = await makeOrg();
-    const ref = `MSCU${String(Date.now()).slice(-7)}`;
+    const ref = box(Number(String(Date.now()).slice(-6)));
     await startTracking(a.ctx, await shipmentFor(a.ctx), { reference: ref });
     await startTracking(b.ctx, await shipmentFor(b.ctx), { reference: ref });
     fake.calls = [];

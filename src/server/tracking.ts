@@ -5,6 +5,7 @@ import { assertCan } from "@/lib/authz";
 import { systemTx, withTenant, type TenantContext, type Tx } from "@/lib/db";
 import { AppError, ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
 import { consumeRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
+import { containerNumberProblem } from "@/lib/tracking/container";
 import { trackingProvider, trackingProviders } from "@/lib/tracking/registry";
 import type { ReferenceType, TrackingSnapshot, TrackOutcome } from "@/lib/tracking/types";
 import { assertWithinLimit, recordUsage } from "./usage";
@@ -36,7 +37,6 @@ export type Tracking = {
   lastError: string | null;
 };
 
-const CONTAINER_RE = /^[A-Z]{4}\d{7}$/;
 const BL_RE = /^[A-Z0-9./-]{3,50}$/;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -105,9 +105,8 @@ export async function startTracking(ctx: TenantContext, shipmentId: string, inpu
     throw new ValidationError(f.message, { [String(f.path[0] ?? "reference")]: f.message });
   }
   const { reference, referenceType, sealine } = parsed.data;
-  if (referenceType === "container" && !CONTAINER_RE.test(reference)) {
-    throw new ValidationError("Container numbers look like MSCU1234567.", { reference: "Container numbers look like MSCU1234567." });
-  }
+  const containerProblem = referenceType === "container" ? containerNumberProblem(reference) : null;
+  if (containerProblem) throw new ValidationError(containerProblem, { reference: containerProblem });
   if (referenceType === "bl" && !BL_RE.test(reference)) {
     throw new ValidationError("Enter the B/L number as printed by the carrier.", { reference: "Enter the B/L number as printed by the carrier." });
   }

@@ -20,7 +20,8 @@ export async function startTrackingAction(_: FormState, form: FormData): Promise
     const r = await startTracking(ctx, shipmentId, values, await requestMeta());
     revalidatePath(`/shipments/${shipmentId}`);
     if (r.outcome === "ok") return { ok: true, message: "Live tracking started." };
-    return { ok: false, message: OUTCOME_MESSAGE[r.outcome] ?? r.message ?? "Tracking could not be started.", values };
+    // The tracking row shows the provider's reason, so the form does not repeat it.
+    return { ok: false, values };
   }, values);
 }
 
