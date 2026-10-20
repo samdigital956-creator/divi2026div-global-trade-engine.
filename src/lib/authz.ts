@@ -17,14 +17,16 @@ export type Permission =
   | "document_types:manage"
   | "tasks:write"
   | "audit:read"
-  | "integrations:read";
+  | "integrations:read"
+  | "billing:manage";
 
 const READ: Permission[] = ["org:read", "members:read", "shipments:read", "documents:read", "integrations:read"];
 const MEMBER: Permission[] = [...READ, "shipments:write", "documents:upload", "documents:edit_fields", "tasks:write"];
 const ADMIN: Permission[] = [...MEMBER, "org:update", "members:manage", "documents:approve", "document_types:manage", "audit:read"];
 
 const MATRIX: Record<Role, ReadonlySet<Permission>> = {
-  owner: new Set(ADMIN),
+  // Only owners commit the organization to payments.
+  owner: new Set([...ADMIN, "billing:manage"]),
   admin: new Set(ADMIN),
   member: new Set(MEMBER),
   viewer: new Set(READ),

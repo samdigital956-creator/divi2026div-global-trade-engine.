@@ -10,7 +10,7 @@ export type IntegrationStatus = {
 };
 
 /** What the settings page shows. */
-export function integrationOverview(aiConfigured: boolean, emailConfigured = false, trackingLabels: string[] = []): IntegrationStatus[] {
+export function integrationOverview(aiConfigured: boolean, emailConfigured = false, trackingLabels: string[] = [], billingConfigured = false): IntegrationStatus[] {
   return [
     {
       category: "ai",
@@ -54,9 +54,11 @@ export function integrationOverview(aiConfigured: boolean, emailConfigured = fal
     {
       category: "billing",
       label: "Billing",
-      providers: ["Subscription billing provider (TBD)"],
-      state: "not_configured",
-      note: "Plan limits are enforced from the plan catalogue.",
+      providers: ["Paddle (merchant of record)"],
+      state: billingConfigured ? "configured" : "not_configured",
+      note: billingConfigured
+        ? "Owners can subscribe, change plan and manage payment under Settings → Billing."
+        : "Plan limits are enforced from the plan catalogue. Set the PADDLE_* variables and BILLING_PLAN_PRICES to take payments.",
     },
   ];
 }

@@ -223,14 +223,32 @@ for processing.
   map of last positions (delayed ones in amber), and counts for live / delayed / arriving
   within 7 days / needing attention.
 - **Delay emails**: an ETA slip emails the organization's owners and admins (once per new ETA).
-- **Scheduled sync** runs as the Railway service `tracking-cron` (`curlimages/curl`, cron
+- **Scheduled sync** runs as the Railway service `tracking-cron` (`alpine:3.20` + busybox `wget`, cron
   `17 */3 * * *`) calling `/api/cron/tracking` with `CRON_SECRET`.
 - `node e2e/tracking.mjs` walks through the flow against Traqo's sandbox.
 - Open items are tracked in `docs/ROADMAP.md`.
 
+## Phase 5 — Billing (Paddle)
+
+- **Paddle Billing** is the merchant of record: it owns prices, tax/VAT, invoices and card
+  data. The app stores only the plan, status, period and Paddle references. Provider-neutral
+  interface in `src/lib/billing/types.ts`.
+- **Settings → Billing**: current plan and status, plan cards with limits and live Paddle
+  prices, Upgrade (Paddle.js overlay checkout), Switch plan (prorated), Manage billing
+  (Paddle customer portal: payment method, invoices, cancel). Only **owners** can pay or
+  change plans; everyone else sees the page read-only.
+- **Webhook** `POST /api/webhooks/paddle`: `Paddle-Signature` HMAC verified on the raw body,
+  de-duplicated by event id, applied in order (older events are ignored). A new subscription
+  is linked to an organization only through a signed checkout token (`APP_SECRET`), so nobody
+  can attach a subscription to someone else's organization. Cancel → back to Trial limits;
+  no data is deleted.
+- **Usage periods**: paid subscriptions use Paddle's billing period; all others reset monthly.
+- Configure with `PADDLE_ENV`, `PADDLE_API_KEY`, `PADDLE_CLIENT_TOKEN`,
+  `PADDLE_WEBHOOK_SECRET`, `BILLING_PLAN_PRICES` (see `.env.example`).
+
 ## Known limitations
 
-- Tariff, WhatsApp and billing providers are interfaces only (`docs/INTEGRATIONS.md`). Tracking adapters other than Traqo are not built yet.
+- Tariff and WhatsApp providers are interfaces only (`docs/INTEGRATIONS.md`). Tracking adapters other than Traqo are not built yet.
 - Map tiles default to OpenStreetMap's public servers, which are meant for light use; set `NEXT_PUBLIC_MAP_TILE_URL` to a commercial tile service before heavy use.
 - After verifying their email a user must sign in again for the new status to apply.
 - Malware scanning needs a ClamAV service; documents uploaded while it is not configured are marked "not scanned".

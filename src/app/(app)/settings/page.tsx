@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { DocumentTypeForm, OrgSettingsForm } from "@/components/forms/settings-forms";
 import { Badge, Card, CardHeader, PageHeader } from "@/components/ui/surface";
 import { can } from "@/lib/authz";
@@ -5,6 +6,7 @@ import { requireTenant } from "@/lib/auth/session";
 import { extractionConfigured } from "@/lib/extraction/registry";
 import { formatBytes, formatDate } from "@/lib/format";
 import { integrationOverview } from "@/lib/integrations";
+import { billingProvider, planPrices } from "@/lib/billing/registry";
 import { trackingProviders } from "@/lib/tracking/registry";
 import { emailSender } from "@/lib/email";
 import { fileScanner } from "@/lib/scanning";
@@ -35,7 +37,8 @@ export default async function SettingsPage() {
   const { ctx } = await requireTenant();
   const [org, types] = await Promise.all([getOrganization(ctx), listDocumentTypes(ctx)]);
   const canEdit = can(ctx.role, "org:update");
-  const integrations = integrationOverview(extractionConfigured(), emailSender().configured(), trackingProviders().map((p) => p.label));
+  const billingConfigured = billingProvider().configured() && Object.keys(planPrices()).length > 0;
+  const integrations = integrationOverview(extractionConfigured(), emailSender().configured(), trackingProviders().map((p) => p.label), billingConfigured);
   const scanner = fileScanner();
   const u = org.usage;
   const store = storage();
@@ -95,7 +98,15 @@ export default async function SettingsPage() {
 
         <div className="space-y-6">
           <Card>
-            <CardHeader title="Plan & usage" description={u ? `Current period ${formatDate(u.periodStart)} – ${formatDate(u.periodEnd)}` : undefined} />
+            <CardHeader
+              title="Plan & usage"
+              description={u ? `Current period ${formatDate(u.periodStart)} – ${formatDate(u.periodEnd)}` : undefined}
+              action={
+                <Link href="/settings/billing" className="text-sm text-accent hover:underline">
+                  Billing →
+                </Link>
+              }
+            />
             {u ? (
               <div className="space-y-4 p-5">
                 <div className="flex items-center justify-between">
@@ -107,7 +118,9 @@ export default async function SettingsPage() {
                 <Meter label="Storage" used={u.storage.used} limit={u.storage.limit} format={formatBytes} />
                 <Meter label="Live trackings this period" used={u.trackings.used} limit={u.trackings.limit} />
                 <Meter label="Seats" used={u.seats.used} limit={u.seats.limit} />
-                <p className="text-xs text-faint">Billing is not connected yet; plan changes are made by the platform team.</p>
+                <p className="text-xs text-faint">
+                  {billingConfigured ? "Change plan, payment method or invoices under Billing." : "Online payments are not connected yet; plan changes are made by the platform team."}
+                </p>
               </div>
             ) : (
               <p className="p-5 text-sm text-muted">No subscription found.</p>

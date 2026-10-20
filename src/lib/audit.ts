@@ -30,7 +30,11 @@ export type AuditAction =
   | "tracking.started"
   | "tracking.updated"
   | "tracking.stopped"
-  | "tracking.failed";
+  | "tracking.failed"
+  | "billing.checkout_started"
+  | "billing.subscription_updated"
+  | "billing.plan_change_requested"
+  | "billing.portal_opened";
 
 export type RequestMeta = { ip?: string | null; userAgent?: string | null };
 
