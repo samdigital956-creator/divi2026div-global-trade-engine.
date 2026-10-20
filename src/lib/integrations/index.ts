@@ -17,7 +17,7 @@ export function integrationOverview(aiConfigured: boolean): IntegrationStatus[] 
       providers: PLANNED_PROVIDERS.ai.map((p) => p.label),
       state: aiConfigured ? "configured" : "not_configured",
       note: aiConfigured
-        ? "Extraction runs on upload; all values still require human confirmation."
+        ? "Google Gemini reads each upload; every value still requires human confirmation."
         : "No provider configured. Documents are reviewed with manual data entry.",
     },
     {

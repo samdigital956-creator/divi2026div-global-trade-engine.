@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ConfirmFieldButton, FieldsForm, ReviewPanel } from "@/components/forms/review-forms";
+import { ConfirmFieldButton, FieldsForm, RetryExtractionButton, ReviewPanel } from "@/components/forms/review-forms";
 import { DocumentStatusBadge, ExtractionBadge } from "@/components/status";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, CardHeader, DescriptionList, Notice, PageHeader } from "@/components/ui/surface";
 import { can } from "@/lib/authz";
 import { requireTenant } from "@/lib/auth/session";
 import { NotFoundError } from "@/lib/errors";
+import { extractionConfigured } from "@/lib/extraction/registry";
 import { formatBytes, formatDateTime } from "@/lib/format";
 import { approvalBlockers, getDocument, LOW_CONFIDENCE } from "@/server/documents";
 
@@ -25,6 +26,7 @@ export default async function DocumentReviewPage({ params, searchParams }: { par
   const fileUrl = `/api/documents/${doc.id}/file`;
   const isPdf = doc.mimeType === "application/pdf";
   const isBrowserImage = doc.mimeType === "image/png" || doc.mimeType === "image/jpeg";
+  const canRetry = editable && extractionConfigured() && doc.extractionStatus !== "processing";
 
   return (
     <>
@@ -52,12 +54,21 @@ export default async function DocumentReviewPage({ params, searchParams }: { par
       {sp.uploaded && <Notice tone="success" className="mb-4" title="Uploaded securely">The file passed type and content checks and is stored privately.</Notice>}
       {doc.extractionStatus === "not_configured" && (
         <Notice tone="info" className="mb-4" title="AI extraction not configured">
-          No AI/OCR provider credentials are set, so nothing was extracted automatically. Enter the values from the document below.
+          {extractionConfigured()
+            ? "This document was uploaded before AI extraction was enabled. You can have it read now, or enter values manually."
+            : "No AI/OCR provider credentials are set, so nothing was extracted automatically. Enter the values from the document below."}
+          {canRetry && <RetryExtractionButton documentId={doc.id} label="Read with AI" />}
+        </Notice>
+      )}
+      {doc.extractionStatus === "completed" && doc.status !== "approved" && (
+        <Notice tone="info" className="mb-4" title={`Read by AI${doc.extractionProvider ? ` (${doc.extractionProvider})` : ""}`}>
+          Values below were filled in automatically. Check each one against the document and confirm or correct it. Fields the AI could not read are left empty.
         </Notice>
       )}
       {doc.extractionStatus === "failed" && (
         <Notice tone="error" className="mb-4" title="Extraction failed">
           {doc.extractionError ?? "The provider returned an error."} Enter values manually.
+          {canRetry && <RetryExtractionButton documentId={doc.id} label="Try again" />}
         </Notice>
       )}
       {doc.status === "rejected" && doc.reviewNote && (

@@ -37,6 +37,12 @@ export class S3StorageDriver implements StorageDriver {
     await this.client.send(new DeleteObjectCommand({ Bucket: this.cfg.bucket, Key: key }));
   }
 
+  async get(key: string) {
+    const res = await this.client.send(new GetObjectCommand({ Bucket: this.cfg.bucket, Key: key }));
+    if (!res.Body) throw new Error("Empty object");
+    return res.Body.transformToByteArray();
+  }
+
   async signedDownloadUrl(key: string, opts: SignedUrlOptions) {
     const cmd = new GetObjectCommand({
       Bucket: this.cfg.bucket,

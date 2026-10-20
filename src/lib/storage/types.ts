@@ -15,6 +15,8 @@ export interface StorageDriver {
   readonly name: string;
   put(key: string, body: Uint8Array, contentType: string): Promise<void>;
   delete(key: string): Promise<void>;
+  /** Server-side read, e.g. to send a stored document to the extraction provider. */
+  get(key: string): Promise<Uint8Array>;
   signedDownloadUrl(key: string, opts: SignedUrlOptions): Promise<string>;
 }
 

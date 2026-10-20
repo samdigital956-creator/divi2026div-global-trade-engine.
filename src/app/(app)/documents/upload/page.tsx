@@ -33,7 +33,12 @@ export default async function UploadPage({ searchParams }: { searchParams: Promi
           Private document storage has not been configured on the server. Uploads are disabled until an administrator sets the S3 bucket variables.
         </Notice>
       )}
-      {!extractionConfigured() && (
+      {extractionConfigured() ? (
+        <Notice tone="info" className="mb-6" title="AI-assisted review">
+          After upload the document is read by AI (PDF, PNG or JPEG; this can take up to a minute). You then confirm or correct every value.
+          The file is sent to the AI provider for processing.
+        </Notice>
+      ) : (
         <Notice tone="info" className="mb-6" title="Manual review">
           AI extraction is not configured, so you will enter key values yourself on the next screen.
         </Notice>

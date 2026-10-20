@@ -1,18 +1,18 @@
 import "server-only";
+import { GeminiExtractionProvider, UnsupportedFileError } from "./gemini";
 import type { AiExtractionProvider, ExtractionInput, ExtractionOutcome, OcrProvider, ProviderStatus } from "./types";
 
 /**
- * Provider registry. Phase 1 ships NO live provider: vendor adapters will be
- * added after their current API docs, pricing, data-processing terms and
- * credentials have been reviewed (see docs/INTEGRATIONS.md). Until then every
- * document is routed to manual entry and the UI states that clearly.
+ * Provider registry. Gemini is the first live AI provider (enabled by
+ * GEMINI_API_KEY). Without a configured provider every document is routed to
+ * manual entry and the UI states that clearly.
  *
  * To add one: implement OcrProvider / AiExtractionProvider in this folder and
- * add it to the arrays below, selected by EXTRACTION_OCR_PROVIDER /
- * EXTRACTION_AI_PROVIDER.
+ * add it to the arrays below. EXTRACTION_OCR_PROVIDER / EXTRACTION_AI_PROVIDER
+ * pick a provider by id; when unset, the first configured one is used.
  */
 const ocrProviders: OcrProvider[] = [];
-const aiProviders: AiExtractionProvider[] = [];
+const aiProviders: AiExtractionProvider[] = [new GeminiExtractionProvider()];
 
 export const PLANNED_PROVIDERS = {
   ocr: [
@@ -20,6 +20,7 @@ export const PLANNED_PROVIDERS = {
     { id: "azure-document-intelligence", label: "Azure AI Document Intelligence", env: ["AZURE_DOCINTEL_ENDPOINT", "AZURE_DOCINTEL_KEY"] },
   ],
   ai: [
+    { id: "gemini", label: "Google Gemini", env: ["GEMINI_API_KEY"] },
     { id: "anthropic", label: "Anthropic Claude", env: ["ANTHROPIC_API_KEY"] },
     { id: "openai", label: "OpenAI", env: ["OPENAI_API_KEY"] },
   ],
@@ -33,7 +34,7 @@ export function setExtractionProvidersForTesting(p: typeof overrides) {
 
 function select<T extends { id: string; status(): ProviderStatus }>(list: T[], envName: string): T | null {
   const wanted = process.env[envName];
-  const p = wanted ? list.find((x) => x.id === wanted) : undefined;
+  const p = wanted ? list.find((x) => x.id === wanted) : list.find((x) => x.status().configured);
   return p && p.status().configured ? p : null;
 }
 
@@ -65,7 +66,10 @@ export async function runExtraction(input: ExtractionInput): Promise<ExtractionO
     );
     return { status: "completed", provider: ocr ? `${ocr.id}+${ai.id}` : ai.id, candidates };
   } catch (err) {
-    console.error("[extraction] provider error", err);
+    if (err instanceof UnsupportedFileError) {
+      return { status: "failed", provider: ai.id, message: "This file type can't be read by the AI provider. Enter values manually." };
+    }
+    console.error("[extraction] provider error:", err instanceof Error ? err.message : "unknown");
     return { status: "failed", provider: ai.id, message: "The extraction provider returned an error. Enter values manually or retry later." };
   }
 }

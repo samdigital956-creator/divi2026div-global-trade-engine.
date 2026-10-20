@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requestMeta, tenantForAction } from "@/lib/auth/session";
-import { approveDocument, confirmField, rejectDocument, reopenDocument, saveDocumentFields } from "@/server/documents";
+import { approveDocument, confirmField, rejectDocument, reopenDocument, retryExtraction, saveDocumentFields } from "@/server/documents";
 import type { FormState } from "./form-state";
 import { handle } from "./handle";
 
@@ -30,6 +30,16 @@ export async function confirmFieldAction(_: FormState, form: FormData): Promise<
     await confirmField(ctx, id, String(form.get("fieldKey") ?? ""), await requestMeta());
     revalidatePath(`/documents/${id}`);
     return { ok: true, message: "Value confirmed." };
+  });
+}
+
+export async function retryExtractionAction(_: FormState, form: FormData): Promise<FormState> {
+  const id = String(form.get("documentId") ?? "");
+  return handle(async () => {
+    const { ctx } = await tenantForAction();
+    await retryExtraction(ctx, id, await requestMeta());
+    revalidatePath(`/documents/${id}`);
+    return { ok: true, message: "AI extraction finished. Check and confirm each value." };
   });
 }
 

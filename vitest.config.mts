@@ -18,6 +18,7 @@ export default defineConfig({
       DATABASE_URL: process.env.TEST_DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/gtc_test",
       APP_SECRET: "test-secret-test-secret-test-secret-0123",
       STORAGE_DRIVER: "local",
+      GEMINI_API_KEY: "",
     },
   },
 });

@@ -39,6 +39,10 @@ export class LocalStorageDriver implements StorageDriver {
     return readFile(this.resolve(key));
   }
 
+  async get(key: string) {
+    return new Uint8Array(await this.read(key));
+  }
+
   async signedDownloadUrl(key: string, opts: SignedUrlOptions) {
     const payload: TokenPayload = {
       k: key,

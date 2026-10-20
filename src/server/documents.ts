@@ -287,6 +287,26 @@ async function extract(
   });
 }
 
+/** Re-run AI extraction on a stored document. Values a person entered are never overwritten. */
+export async function retryExtraction(ctx: TenantContext, id: string, meta: RequestMeta = {}) {
+  assertCan(ctx.role, "documents:edit_fields");
+  assertUuid(id, "Document");
+  const store = storage();
+  if (!store) throw new AppError("Document storage is not configured.", 503, "storage_not_configured");
+  const d = await withTenant(ctx, async (tx) => {
+    const { rows } = await tx.query(
+      `SELECT d.status, d.storage_key, d.mime_type, t.key AS type_key, t.field_schema
+         FROM shipment_documents d JOIN document_types t ON t.id = d.document_type_id WHERE d.id = $1`,
+      [id],
+    );
+    if (!rows[0]) throw new NotFoundError("Document not found.");
+    if (rows[0].status === "approved") throw new ConflictError("Approved documents are locked. Reopen the document first.");
+    return rows[0];
+  });
+  const bytes = await store.get(d.storage_key);
+  await extract(ctx, id, d.type_key, d.field_schema, d.mime_type, bytes, meta);
+}
+
 export type DocumentDetail = DocumentSummary & {
   documentTypeId: string;
   typeKey: string;
