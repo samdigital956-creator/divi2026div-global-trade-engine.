@@ -174,12 +174,34 @@ FIREBASE_WEB_API_KEY / FIREBASE_AUTH_DOMAIN / FIREBASE_PROJECT_ID / FIREBASE_APP
 FIREBASE_SERVICE_ACCOUNT_JSON=<secret>
 ```
 
-## Known limitations (Phase 1)
+## Phase 2 — AI extraction (Google Gemini)
 
-- No AI/OCR, tracking, tariff, messaging or billing provider is implemented — interfaces only (`docs/INTEGRATIONS.md`).
-- Invitations are not emailed; the invitee signs up with the invited address and accepts on onboarding.
+Set `GEMINI_API_KEY`. Uploads return immediately and Gemini reads the file in the
+background (Interactions API, inline PDF/PNG/JPEG, JSON-schema output); the review page
+shows "AI is reading…" and refreshes. Every AI value is stored as unconfirmed with the
+model's self-reported confidence and must be confirmed or corrected before approval.
+"Read with AI" re-runs extraction without overwriting values a person typed. TIFF files
+are not supported by Gemini and fall back to manual entry. Documents are sent to Google
+for processing.
+
+## Phase 3 — Emails, rate limits, malware scanning
+
+- **Invitation emails** via Resend (`RESEND_API_KEY`, `EMAIL_FROM`, `APP_URL`). Delivery
+  status is stored per invitation; failed emails can be resent. Without configuration,
+  invitations are still created and the UI says no email was sent.
+- **Rate limits** (Postgres fixed windows, shared across instances): sign-in 20/10 min
+  per IP, uploads 60/10 min per user, invitations 30/hour per organization. Responses are
+  HTTP 429 with `Retry-After`.
+- **Malware scanning** with ClamAV (`CLAMAV_HOST`/`CLAMAV_PORT`, clamd INSTREAM). Files are
+  scanned before storage; infected files are refused and audited; if a configured scanner
+  is unreachable the upload fails closed (HTTP 503). Each document shows its scan result.
+
+## Known limitations
+
+- Tracking, tariff, WhatsApp and billing providers are interfaces only (`docs/INTEGRATIONS.md`).
 - After verifying their email a user must sign in again for the new status to apply.
-- No rate limiting on auth/upload endpoints yet (Firebase applies its own sign-in throttling); no malware scanning of uploads.
+- Malware scanning needs a ClamAV service; documents uploaded while it is not configured are marked "not scanned".
+- Invitation emails need a verified sending domain in Resend.
 - No Content-Security-Policy header yet (other security headers are set).
 - With `loading.tsx` streaming, a cross-tenant/unknown id renders the 404 page but may return HTTP 200 for page routes (API routes return 404). No data is rendered.
 - Soft delete / archival of shipments and documents is not implemented.

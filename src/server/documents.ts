@@ -7,6 +7,7 @@ import { withTenant, type TenantContext, type Tx } from "@/lib/db";
 import { AppError, ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
 import { extractionConfigured, runExtraction } from "@/lib/extraction/registry";
 import type { FieldDefinition } from "@/lib/extraction/types";
+import { fileScanner, type ScanResult } from "@/lib/scanning";
 import { storage, storageKeyFor } from "@/lib/storage";
 import { validateUpload } from "@/lib/uploads";
 import { assertWithinLimit, recordUsage } from "./usage";
@@ -222,6 +223,33 @@ export async function uploadDocument(ctx: TenantContext, input: UploadInput, met
   const store = storage();
   if (!store) throw new AppError("Document storage is not configured. Contact your administrator.", 503, "storage_not_configured");
 
+  // Malware scan happens before anything is stored. If a scanner is configured
+  // but unavailable, fail closed rather than accept an unscanned file.
+  let scan: ScanResult | null = null;
+  const scanner = fileScanner();
+  if (scanner) {
+    try {
+      scan = await scanner.scan(input.bytes);
+    } catch (err) {
+      console.error("[scan] scanner error:", err instanceof Error ? err.message : "unknown");
+      throw new AppError("The virus scanner is temporarily unavailable. Please try again in a few minutes.", 503, "scanner_unavailable");
+    }
+    if (!scan.clean) {
+      const infected = scan;
+      await withTenant(ctx, (tx) =>
+        audit(tx, ctx, "upload.rejected", { type: "shipment", id: input.shipmentId }, {
+          filename: file.filename,
+          size: input.bytes.byteLength,
+          reason: "malware",
+          engine: infected.engine,
+          signature: infected.signature.slice(0, 200),
+        }, meta),
+      ).catch(() => {});
+      const msg = "This file was flagged by the virus scanner and was not uploaded.";
+      throw new ValidationError(msg, { file: msg });
+    }
+  }
+
   const documentId = randomUUID();
   const storageKey = storageKeyFor(ctx.orgId, input.shipmentId, documentId);
   const sha256 = createHash("sha256").update(input.bytes).digest("hex");
@@ -241,9 +269,12 @@ export async function uploadDocument(ctx: TenantContext, input: UploadInput, met
     await withTenant(ctx, async (tx) => {
       await tx.query(
         `INSERT INTO shipment_documents (id, org_id, shipment_id, document_type_id, original_filename, storage_key, mime_type,
-            size_bytes, sha256, status, extraction_status, uploaded_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'uploaded','pending',$10)`,
-        [documentId, ctx.orgId, input.shipmentId, input.documentTypeId, file.filename, storageKey, file.mime, input.bytes.byteLength, sha256, ctx.userId],
+            size_bytes, sha256, status, extraction_status, uploaded_by, scan_status, scan_engine, scanned_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'uploaded','pending',$10,$11,$12,$13)`,
+        [
+          documentId, ctx.orgId, input.shipmentId, input.documentTypeId, file.filename, storageKey, file.mime, input.bytes.byteLength,
+          sha256, ctx.userId, scan ? "clean" : "not_scanned", scan?.engine ?? null, scan ? new Date() : null,
+        ],
       );
       await tx.query(
         `INSERT INTO shipment_events (org_id, shipment_id, event_type, description, source, created_by)
@@ -263,6 +294,7 @@ export async function uploadDocument(ctx: TenantContext, input: UploadInput, met
         filename: file.filename,
         size: input.bytes.byteLength,
         sha256,
+        scan: scan ? `clean (${scan.engine})` : "not_scanned",
       }, meta);
     });
   } catch (err) {
@@ -349,6 +381,9 @@ export type DocumentDetail = DocumentSummary & {
   reviewedBy: string | null;
   reviewedAt: Date | null;
   updatedAt: Date;
+  scanStatus: "not_scanned" | "clean";
+  scanEngine: string | null;
+  scannedAt: Date | null;
 };
 
 async function loadDetail(tx: Tx, id: string): Promise<DocumentDetail> {
@@ -396,6 +431,9 @@ async function loadDetail(tx: Tx, id: string): Promise<DocumentDetail> {
     reviewedBy: d.reviewed_by_name,
     reviewedAt: d.reviewed_at,
     updatedAt: d.updated_at,
+    scanStatus: d.scan_status,
+    scanEngine: d.scan_engine,
+    scannedAt: d.scanned_at,
   };
 }
 

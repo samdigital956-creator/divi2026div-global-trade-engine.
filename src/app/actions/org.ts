@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { ORG_COOKIE, requestMeta, requireUser, tenantForAction } from "@/lib/auth/session";
 import { acceptInvitation, createOrganization, listMemberships } from "@/server/accounts";
 import { createDocumentType } from "@/server/documents";
-import { changeMemberRole, inviteMember, removeMember, revokeInvitation, updateOrganization } from "@/server/organization";
+import { changeMemberRole, inviteMember, removeMember, resendInvitationEmail, revokeInvitation, updateOrganization } from "@/server/organization";
 import { formToObject } from "@/server/validation";
 import type { FormState } from "./form-state";
 import { handle } from "./handle";
@@ -76,9 +76,12 @@ export async function inviteMemberAction(_: FormState, form: FormData): Promise<
   const values = formToObject(form);
   return handle(async () => {
     const { ctx } = await tenantForAction();
-    await inviteMember(ctx, values, await requestMeta());
+    const { emailStatus } = await inviteMember(ctx, values, await requestMeta());
     revalidatePath("/settings/members");
-    return { ok: true, message: `Invitation created for ${values.email}. They can accept it after signing up with that email and verifying it.` };
+    const next = "They accept it after signing up (or signing in) with that email and verifying it.";
+    if (emailStatus === "sent") return { ok: true, message: `Invitation email sent to ${values.email}. ${next}` };
+    if (emailStatus === "failed") return { ok: true, message: `Invitation created for ${values.email}, but the email could not be sent. Use "Resend email" or tell them directly. ${next}` };
+    return { ok: true, message: `Invitation created for ${values.email} (email sending is not configured, so let them know yourself). ${next}` };
   }, values);
 }
 
@@ -97,6 +100,17 @@ export async function removeMemberAction(_: FormState, form: FormData): Promise<
     await removeMember(ctx, String(form.get("membershipId")), await requestMeta());
     revalidatePath("/settings/members");
     return { ok: true, message: "Member removed." };
+  });
+}
+
+export async function resendInvitationAction(_: FormState, form: FormData): Promise<FormState> {
+  return handle(async () => {
+    const { ctx } = await tenantForAction();
+    const status = await resendInvitationEmail(ctx, String(form.get("invitationId")));
+    revalidatePath("/settings/members");
+    return status === "sent"
+      ? { ok: true, message: "Email sent." }
+      : { ok: false, message: status === "failed" ? "The email could not be sent." : "Email sending is not configured." };
   });
 }
 

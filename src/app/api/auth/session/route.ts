@@ -4,6 +4,7 @@ import { identityProvider } from "@/lib/auth/identity";
 import { assertSameOrigin, ORG_COOKIE, SESSION_COOKIE, SESSION_TTL_MS, userFromSessionCookie } from "@/lib/auth/session";
 import { AppError, UnauthorizedError, ValidationError } from "@/lib/errors";
 import { jsonError } from "@/lib/http";
+import { clientIp, consumeRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 import { upsertUser } from "@/server/accounts";
 
 const bodySchema = z.object({ idToken: z.string().min(20).max(8192) });
@@ -12,6 +13,7 @@ const bodySchema = z.object({ idToken: z.string().min(20).max(8192) });
 export async function POST(req: NextRequest) {
   try {
     assertSameOrigin(req);
+    await consumeRateLimit(RATE_LIMITS.signIn, clientIp(req.headers));
     const provider = await identityProvider();
     if (!provider.configured()) throw new AppError("Authentication is not configured on the server.", 503, "auth_not_configured");
     const body = bodySchema.safeParse(await req.json().catch(() => null));

@@ -11,10 +11,11 @@ import type { AiExtractionProvider, ExtractionInput, FieldCandidate, ProviderSta
  * value is still stored as unconfirmed and must be checked by a person.
  */
 const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/interactions";
-const DEFAULT_MODEL = "gemini-3.8-flash";
+// Fastest current model; in live tests it read a full invoice in ~4s, while 3.8 Flash did not answer within 150s.
+const DEFAULT_MODEL = "gemini-3.5-flash-lite";
 const TIMEOUT_MS = 150_000;
-// Field capture needs little reasoning; "low" keeps latency down on 3.x Flash models.
-const THINKING_LEVEL = process.env.GEMINI_THINKING_LEVEL || "low";
+// Field capture needs little reasoning; a low thinking level keeps latency down.
+const THINKING_LEVEL = process.env.GEMINI_THINKING_LEVEL || "minimal";
 
 const INPUT_TYPE: Record<string, "document" | "image"> = {
   "application/pdf": "document",

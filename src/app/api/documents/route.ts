@@ -2,6 +2,7 @@ import { after, NextResponse, type NextRequest } from "next/server";
 import { assertSameOrigin, metaFromRequest, tenantFromRequest } from "@/lib/auth/session";
 import { ValidationError } from "@/lib/errors";
 import { jsonError } from "@/lib/http";
+import { consumeRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 import { MAX_UPLOAD_BYTES } from "@/lib/uploads";
 import { uploadDocument } from "@/server/documents";
 
@@ -10,6 +11,7 @@ export async function POST(req: NextRequest) {
   try {
     assertSameOrigin(req);
     const { ctx } = await tenantFromRequest(req);
+    await consumeRateLimit(RATE_LIMITS.upload, ctx.userId);
 
     const declared = Number(req.headers.get("content-length") ?? 0);
     if (declared > MAX_UPLOAD_BYTES + 64 * 1024) {

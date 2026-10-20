@@ -50,6 +50,12 @@ export class LimitExceededError extends AppError {
   }
 }
 
+export class RateLimitedError extends AppError {
+  constructor(readonly retryAfterSeconds: number) {
+    super(`Too many attempts. Please wait ${retryAfterSeconds < 90 ? `${retryAfterSeconds} seconds` : `${Math.ceil(retryAfterSeconds / 60)} minutes`} and try again.`, 429, "rate_limited");
+  }
+}
+
 export function publicError(err: unknown): { message: string; status: number; code: string; fieldErrors?: Record<string, string> } {
   if (err instanceof AppError) {
     return { message: err.message, status: err.status, code: err.code, fieldErrors: err.fieldErrors };

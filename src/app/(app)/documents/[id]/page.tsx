@@ -130,7 +130,7 @@ export default async function DocumentReviewPage({ params, searchParams }: { par
           <Card>
             <CardHeader title="Document values" description={editable ? "Edit any value; values you type are recorded as entered by you." : undefined} />
             <div className="p-5">
-              <FieldsForm key={doc.extractionStatus} documentId={doc.id} fields={doc.fields} values={doc.values} editable={editable} lowConfidence={LOW_CONFIDENCE} />
+              <FieldsForm key={doc.extractionStatus === "processing" ? "processing" : "ready"} documentId={doc.id} fields={doc.fields} values={doc.values} editable={editable} lowConfidence={LOW_CONFIDENCE} />
             </div>
           </Card>
 
@@ -150,6 +150,13 @@ export default async function DocumentReviewPage({ params, searchParams }: { par
                   { label: "Size / type", value: `${formatBytes(doc.sizeBytes)} · ${doc.mimeType}` },
                   { label: "SHA-256", value: <span className="break-all font-mono text-xs">{doc.sha256}</span> },
                   { label: "Extraction provider", value: doc.extractionProvider },
+                  {
+                    label: "Virus scan",
+                    value:
+                      doc.scanStatus === "clean"
+                        ? `Clean (${doc.scanEngine ?? "scanner"}) · ${formatDateTime(doc.scannedAt)}`
+                        : "Not scanned (scanner not configured at upload time)",
+                  },
                 ]}
               />
             </div>

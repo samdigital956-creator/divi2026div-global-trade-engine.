@@ -1,7 +1,9 @@
 import "server-only";
 import { z } from "zod";
 import { audit, type RequestMeta } from "@/lib/audit";
-import { assertCan, ROLES, type Role } from "@/lib/authz";
+import { assertCan, ROLE_LABELS, ROLES, type Role } from "@/lib/authz";
+import { invitationEmail, sendEmail } from "@/lib/email";
+import { consumeRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 import { withTenant, type TenantContext } from "@/lib/db";
 import { ConflictError, ForbiddenError, LimitExceededError, NotFoundError, ValidationError } from "@/lib/errors";
 import { usageSummary } from "./usage";
@@ -71,7 +73,7 @@ export async function listMembers(ctx: TenantContext) {
         ORDER BY array_position(ARRAY['owner','admin','member','viewer']::member_role[], m.role), u.email`,
     );
     const invitations = await tx.query(
-      `SELECT id, email, role, expires_at, created_at FROM organization_invitations
+      `SELECT id, email, role, expires_at, created_at, email_status FROM organization_invitations
         WHERE accepted_at IS NULL AND revoked_at IS NULL ORDER BY created_at DESC`,
     );
     return {
@@ -90,6 +92,7 @@ export async function listMembers(ctx: TenantContext) {
         role: r.role as Role,
         expiresAt: r.expires_at as Date,
         expired: (r.expires_at as Date) < new Date(),
+        emailStatus: r.email_status as "not_sent" | "sent" | "failed" | "not_configured",
       })),
     };
   });
@@ -100,13 +103,16 @@ export const inviteSchema = z.object({
   role: z.enum(["admin", "member", "viewer"], "Choose a role."),
 });
 
-export async function inviteMember(ctx: TenantContext, input: unknown, meta: RequestMeta = {}) {
+export type InvitationEmailStatus = "sent" | "failed" | "not_configured";
+
+export async function inviteMember(ctx: TenantContext, input: unknown, meta: RequestMeta = {}): Promise<{ emailStatus: InvitationEmailStatus }> {
   assertCan(ctx.role, "members:manage");
   const parsed = inviteSchema.safeParse(input);
   if (!parsed.success) throw new ValidationError("Please fix the highlighted fields.", zodFieldErrors(parsed.error));
   const { email, role } = parsed.data;
   if (role === "admin" && ctx.role !== "owner" && ctx.role !== "admin") throw new ForbiddenError();
-  await withTenant(ctx, async (tx) => {
+  await consumeRateLimit(RATE_LIMITS.invite, ctx.orgId);
+  const invitationId = await withTenant(ctx, async (tx) => {
     const exists = await tx.query(
       `SELECT 1 FROM organization_memberships m JOIN users u ON u.id = m.user_id WHERE u.email = $1`,
       [email],
@@ -131,11 +137,56 @@ export async function inviteMember(ctx: TenantContext, input: unknown, meta: Req
         [ctx.orgId, email, role, ctx.userId],
       );
       await audit(tx, ctx, "member.invited", { type: "invitation", id: rows[0].id }, { email, role }, meta);
+      return rows[0].id as string;
     } catch (err) {
       if ((err as { code?: string }).code === "23505") throw new ConflictError("An invitation for this email is already pending.");
       throw err;
     }
   });
+  return { emailStatus: await deliverInvitationEmail(ctx, invitationId) };
+}
+
+/** Send (or re-send) the invitation email and record the outcome on the invitation. */
+async function deliverInvitationEmail(ctx: TenantContext, invitationId: string): Promise<InvitationEmailStatus> {
+  const info = await withTenant(ctx, async (tx) => {
+    const { rows } = await tx.query(
+      `SELECT i.email, i.role, o.name AS org_name, COALESCE(u.display_name, u.email) AS inviter
+         FROM organization_invitations i
+         JOIN organizations o ON o.id = i.org_id
+         LEFT JOIN users u ON u.id = $2
+        WHERE i.id = $1 AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND i.expires_at > now()`,
+      [invitationId, ctx.userId],
+    );
+    return rows[0];
+  });
+  if (!info) throw new NotFoundError("Invitation not found or expired.");
+  const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
+  const result = appUrl
+    ? await sendEmail({
+        to: info.email,
+        ...invitationEmail({ orgName: info.org_name, inviterName: info.inviter ?? "A teammate", role: ROLE_LABELS[info.role as Role], appUrl, email: info.email }),
+        idempotencyKey: `invite-${invitationId}-${Math.floor(Date.now() / 60_000)}`,
+      })
+    : ({ status: "not_configured" } as const);
+  await withTenant(ctx, async (tx) => {
+    await tx.query(
+      `UPDATE organization_invitations
+          SET email_status = $2,
+              email_sent_at = CASE WHEN $2 = 'sent' THEN now() ELSE email_sent_at END,
+              email_provider_id = COALESCE($3, email_provider_id)
+        WHERE id = $1`,
+      [invitationId, result.status, result.status === "sent" ? result.providerId : null],
+    );
+    await audit(tx, ctx, "member.invitation_email", { type: "invitation", id: invitationId }, { status: result.status });
+  });
+  return result.status;
+}
+
+export async function resendInvitationEmail(ctx: TenantContext, invitationId: string) {
+  assertCan(ctx.role, "members:manage");
+  if (!z.uuid().safeParse(invitationId).success) throw new NotFoundError("Invitation not found.");
+  await consumeRateLimit(RATE_LIMITS.invite, ctx.orgId);
+  return deliverInvitationEmail(ctx, invitationId);
 }
 
 export async function revokeInvitation(ctx: TenantContext, invitationId: string, meta: RequestMeta = {}) {

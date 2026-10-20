@@ -9,7 +9,7 @@ export type IntegrationStatus = {
 };
 
 /** What the settings page shows. Nothing here is "connected" in Phase 1. */
-export function integrationOverview(aiConfigured: boolean): IntegrationStatus[] {
+export function integrationOverview(aiConfigured: boolean, emailConfigured = false): IntegrationStatus[] {
   return [
     {
       category: "ai",
@@ -44,9 +44,9 @@ export function integrationOverview(aiConfigured: boolean): IntegrationStatus[] 
     {
       category: "messaging",
       label: "Email & WhatsApp",
-      providers: ["Email", "WhatsApp Business"],
-      state: "not_configured",
-      note: "No notifications are sent yet.",
+      providers: ["Email (Resend)", "WhatsApp Business"],
+      state: emailConfigured ? "configured" : "not_configured",
+      note: emailConfigured ? "Invitation emails are sent through Resend. WhatsApp is not connected." : "No emails are sent. Set RESEND_API_KEY and EMAIL_FROM to send invitation emails.",
     },
     {
       category: "billing",

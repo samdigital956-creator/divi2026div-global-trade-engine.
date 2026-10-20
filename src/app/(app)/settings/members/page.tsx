@@ -1,5 +1,6 @@
-import { InviteForm, RemoveMemberButton, RevokeInvitationButton, RoleSelect } from "@/components/forms/member-forms";
-import { Badge, Card, CardHeader, EmptyState, PageHeader } from "@/components/ui/surface";
+import { InviteForm, RemoveMemberButton, ResendInvitationButton, RevokeInvitationButton, RoleSelect } from "@/components/forms/member-forms";
+import { Badge, Card, CardHeader, EmptyState, Notice, PageHeader } from "@/components/ui/surface";
+import { emailSender } from "@/lib/email";
 import { Table, Td, Th } from "@/components/ui/table";
 import { can, ROLE_DESCRIPTIONS, ROLE_LABELS, ROLES } from "@/lib/authz";
 import { requireTenant } from "@/lib/auth/session";
@@ -12,6 +13,7 @@ export default async function MembersPage() {
   const { ctx } = await requireTenant();
   const { members, invitations } = await listMembers(ctx);
   const canManage = can(ctx.role, "members:manage");
+  const emailReady = emailSender().configured() && !!process.env.APP_URL;
 
   return (
     <>
@@ -21,7 +23,10 @@ export default async function MembersPage() {
           {canManage && (
             <Card>
               <CardHeader title="Invite a teammate" description="They sign up (or sign in) with this email, verify it, and accept the invitation during onboarding." />
-              <div className="p-5">
+              <div className="space-y-4 p-5">
+                {!emailReady && (
+                  <Notice tone="info">Invitation emails are not configured, so invitations are created without an email. Let the person know to sign up with the invited address.</Notice>
+                )}
                 <InviteForm allowAdmin={ctx.role === "owner" || ctx.role === "admin"} />
               </div>
             </Card>
@@ -73,10 +78,22 @@ export default async function MembersPage() {
                     <div className="min-w-0">
                       <p className="truncate text-sm">{i.email}</p>
                       <p className="text-xs text-muted">
-                        {ROLE_LABELS[i.role]} · {i.expired ? <span className="text-bad">expired</span> : `expires ${formatDate(i.expiresAt)}`}
+                        {ROLE_LABELS[i.role]} · {i.expired ? <span className="text-bad">expired</span> : `expires ${formatDate(i.expiresAt)}`} ·{" "}
+                        {i.emailStatus === "sent" ? (
+                          <span className="text-ok">email sent</span>
+                        ) : i.emailStatus === "failed" ? (
+                          <span className="text-bad">email failed</span>
+                        ) : (
+                          <span>no email sent</span>
+                        )}
                       </p>
                     </div>
-                    {canManage && <RevokeInvitationButton invitationId={i.id} />}
+                    {canManage && (
+                      <div className="flex items-start gap-1">
+                        {emailReady && !i.expired && i.emailStatus !== "sent" && <ResendInvitationButton invitationId={i.id} />}
+                        <RevokeInvitationButton invitationId={i.id} />
+                      </div>
+                    )}
                   </li>
                 ))}
               </ul>

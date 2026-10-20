@@ -42,7 +42,7 @@ try {
   await a.waitForURL(/\/login/);
 
   step("register owner A");
-  await a.goto(`${BASE}/register`);
+  await a.goto(`${BASE}/register`, { waitUntil: "networkidle" });
   await a.getByRole("button", { name: "Create account" }).click();
   assert(await a.getByText("Enter your full name.").isVisible(), "client validation shown");
   await a.fill('input[name="name"]', "Alex Importer");
@@ -137,7 +137,7 @@ try {
   step("audit history records document access and approval");
   await a.goto(`${BASE}/audit`);
   for (const action of ["document.viewed", "document.downloaded", "document.approved", "upload.rejected", "member.invited"]) {
-    assert(await a.getByText(action, { exact: true }).first().isVisible(), `audit shows ${action}`);
+    await a.getByText(action, { exact: true }).first().waitFor({ timeout: 10000 }).catch(() => assert(false, `audit shows ${action}`));
   }
   await a.screenshot({ path: path.join(SHOTS, "07-audit.png"), fullPage: true });
 
@@ -160,7 +160,7 @@ try {
   step("second organization cannot see the first one's data");
   const ctxB = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const b = await ctxB.newPage();
-  await b.goto(`${BASE}/register`);
+  await b.goto(`${BASE}/register`, { waitUntil: "networkidle" });
   await b.fill('input[name="name"]', "Blake Other");
   await b.fill('input[name="email"]', `blake-${run}@beta.test`);
   await b.fill('input[name="password"]', "another-strong-pass");
@@ -193,7 +193,7 @@ try {
   step("login again as A");
   const ctxA2 = await browser.newContext();
   const a2 = await ctxA2.newPage();
-  await a2.goto(`${BASE}/login`);
+  await a2.goto(`${BASE}/login`, { waitUntil: "networkidle" });
   await a2.fill('input[name="email"]', `alex-${run}@acme.test`);
   await a2.fill('input[name="password"]', "wrong-password");
   await a2.getByRole("button", { name: "Sign in" }).click();

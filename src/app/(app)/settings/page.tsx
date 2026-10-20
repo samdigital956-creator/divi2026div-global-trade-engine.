@@ -5,6 +5,8 @@ import { requireTenant } from "@/lib/auth/session";
 import { extractionConfigured } from "@/lib/extraction/registry";
 import { formatBytes, formatDate } from "@/lib/format";
 import { integrationOverview } from "@/lib/integrations";
+import { emailSender } from "@/lib/email";
+import { fileScanner } from "@/lib/scanning";
 import { storage } from "@/lib/storage";
 import { listDocumentTypes } from "@/server/documents";
 import { getOrganization } from "@/server/organization";
@@ -32,7 +34,8 @@ export default async function SettingsPage() {
   const { ctx } = await requireTenant();
   const [org, types] = await Promise.all([getOrganization(ctx), listDocumentTypes(ctx)]);
   const canEdit = can(ctx.role, "org:update");
-  const integrations = integrationOverview(extractionConfigured());
+  const integrations = integrationOverview(extractionConfigured(), emailSender().configured());
+  const scanner = fileScanner();
   const u = org.usage;
   const store = storage();
 
@@ -114,7 +117,11 @@ export default async function SettingsPage() {
               <p>
                 Document storage: <Badge tone={store ? "ok" : "bad"}>{store ? `Private (${store.name})` : "Not configured"}</Badge>
               </p>
+              <p>
+                Malware scanning: <Badge tone={scanner ? "ok" : "warn"}>{scanner ? `On (${scanner.id})` : "Not configured"}</Badge>
+              </p>
               <p className="text-muted">Files are only reachable through 60-second signed links issued after a permission check. Access is audited.</p>
+              <p className="text-muted">Sign-in, uploads and invitations are rate limited.</p>
               <p className="text-muted">Tenant data is isolated with PostgreSQL row-level security.</p>
             </div>
           </Card>

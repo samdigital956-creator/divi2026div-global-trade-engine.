@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { changeRoleAction, inviteMemberAction, removeMemberAction, revokeInvitationAction } from "@/app/actions/org";
+import { changeRoleAction, inviteMemberAction, removeMemberAction, resendInvitationAction, revokeInvitationAction } from "@/app/actions/org";
 import { FormFeedback } from "@/components/forms/form-feedback";
 import { Field, Input, Select } from "@/components/ui/field";
 import { SubmitButton } from "@/components/ui/submit-button";
@@ -76,6 +76,19 @@ export function RemoveMemberButton({ membershipId, label }: { membershipId: stri
         Remove
       </SubmitButton>
       {state && !state.ok && <p className="text-xs text-bad">{state.message}</p>}
+    </form>
+  );
+}
+
+export function ResendInvitationButton({ invitationId }: { invitationId: string }) {
+  const [state, action] = useActionState(resendInvitationAction, null);
+  return (
+    <form action={action} className="flex flex-col items-end">
+      <input type="hidden" name="invitationId" value={invitationId} />
+      <SubmitButton size="sm" variant="ghost" pendingText="Sending…">
+        Resend email
+      </SubmitButton>
+      {state?.message && <p className={`text-xs ${state.ok ? "text-ok" : "text-bad"}`}>{state.message}</p>}
     </form>
   );
 }
