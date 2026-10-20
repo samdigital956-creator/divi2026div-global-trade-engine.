@@ -257,7 +257,7 @@ export async function listShipmentEvents(ctx: TenantContext, shipmentId: string)
   assertCan(ctx.role, "shipments:read");
   return withTenant(ctx, async (tx) => {
     const { rows } = await tx.query(
-      `SELECT e.id, e.event_type, e.description, e.location, e.occurred_at, e.source, u.display_name, u.email
+      `SELECT e.id, e.event_type, e.description, e.location, e.occurred_at, e.source, e.is_actual, u.display_name, u.email
          FROM shipment_events e LEFT JOIN users u ON u.id = e.created_by
         WHERE e.shipment_id = $1 ORDER BY e.occurred_at DESC, e.created_at DESC LIMIT 200`,
       [shipmentId],
@@ -269,6 +269,7 @@ export async function listShipmentEvents(ctx: TenantContext, shipmentId: string)
       location: r.location as string | null,
       occurredAt: r.occurred_at as Date,
       source: r.source as string,
+      isActual: r.is_actual as boolean | null,
       actor: (r.display_name ?? r.email ?? null) as string | null,
     }));
   });

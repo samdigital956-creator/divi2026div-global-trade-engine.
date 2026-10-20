@@ -12,6 +12,10 @@ export const RATE_LIMITS = {
   upload: { name: "upload:user", limit: 60, windowSeconds: 10 * 60 },
   /** Invitations per organization (each one may send an email). */
   invite: { name: "invite:org", limit: 30, windowSeconds: 60 * 60 },
+  /** New container/B-L trackings per organization (each may cost a provider slot). */
+  trackingStart: { name: "track:org", limit: 30, windowSeconds: 60 * 60 },
+  /** Manual "refresh now" per organization. */
+  trackingRefresh: { name: "trackrefresh:org", limit: 120, windowSeconds: 60 * 60 },
 } satisfies Record<string, RateLimitRule>;
 
 /**

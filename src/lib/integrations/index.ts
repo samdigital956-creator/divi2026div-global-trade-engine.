@@ -1,4 +1,5 @@
 import { PLANNED_PROVIDERS } from "../extraction/registry";
+import { KNOWN_TRACKING_PROVIDERS } from "../tracking/types";
 
 export type IntegrationStatus = {
   category: "tracking" | "ai" | "ocr" | "tariff" | "messaging" | "billing";
@@ -8,8 +9,8 @@ export type IntegrationStatus = {
   note: string;
 };
 
-/** What the settings page shows. Nothing here is "connected" in Phase 1. */
-export function integrationOverview(aiConfigured: boolean, emailConfigured = false): IntegrationStatus[] {
+/** What the settings page shows. */
+export function integrationOverview(aiConfigured: boolean, emailConfigured = false, trackingLabels: string[] = []): IntegrationStatus[] {
   return [
     {
       category: "ai",
@@ -30,9 +31,11 @@ export function integrationOverview(aiConfigured: boolean, emailConfigured = fal
     {
       category: "tracking",
       label: "Container tracking",
-      providers: ["Vizion", "SeaRates"],
-      state: "not_configured",
-      note: "Shipment timelines show manual and system events only.",
+      providers: KNOWN_TRACKING_PROVIDERS.map((p) => p.label),
+      state: trackingLabels.length ? "configured" : "not_configured",
+      note: trackingLabels.length
+        ? `Live carrier milestones, ETA and vessel position via ${trackingLabels.join(", ")}. Other providers can be added alongside.`
+        : "Shipment timelines show manual and system events only.",
     },
     {
       category: "tariff",

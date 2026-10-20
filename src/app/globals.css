@@ -54,3 +54,15 @@ input[type="date"]::-webkit-calendar-picker-indicator,
 input[type="datetime-local"]::-webkit-calendar-picker-indicator {
   filter: invert(0.75);
 }
+
+/* Darken map tiles to match the theme; markers and controls keep their colours. */
+.tracking-map .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9);
+}
+.tracking-map .leaflet-control-attribution {
+  background: rgb(7 13 26 / 0.75);
+  color: var(--color-muted);
+}
+.tracking-map .leaflet-control-attribution a {
+  color: var(--color-ink-2);
+}

@@ -1,9 +1,11 @@
 import Link from "next/link";
+import { after } from "next/server";
 import { notFound } from "next/navigation";
 import { AddEventForm } from "@/components/forms/event-form";
 import { QuickTaskForm } from "@/components/forms/task-form";
 import { DocumentStatusBadge, ExtractionBadge, ShipmentStatusBadge } from "@/components/status";
 import { TaskList } from "@/components/tasks";
+import { TrackingCard } from "@/components/tracking/tracking-card";
 import { ButtonLink } from "@/components/ui/button";
 import { Badge, Card, CardHeader, DescriptionList, EmptyState, Notice, PageHeader } from "@/components/ui/surface";
 import { can } from "@/lib/authz";
@@ -12,6 +14,9 @@ import { NotFoundError } from "@/lib/errors";
 import { formatBytes, formatDate, formatDateTime } from "@/lib/format";
 import { listDocuments } from "@/server/documents";
 import { getShipment, listShipmentEvents } from "@/server/shipments";
+import { listTrackings, refreshDueTrackings } from "@/server/tracking";
+import { trackingConfigured } from "@/lib/tracking/registry";
+import { KNOWN_TRACKING_PROVIDERS } from "@/lib/tracking/types";
 import { listTasks } from "@/server/work";
 
 export const metadata = { title: "Shipment" };
@@ -23,8 +28,16 @@ export default async function ShipmentPage({ params, searchParams }: { params: P
     if (e instanceof NotFoundError) notFound();
     throw e;
   });
-  const [docs, events, tasks] = await Promise.all([listDocuments(ctx, { shipmentId: id }), listShipmentEvents(ctx, id), listTasks(ctx, { shipmentId: id })]);
+  const [docs, events, tasks, trackings] = await Promise.all([
+    listDocuments(ctx, { shipmentId: id }),
+    listShipmentEvents(ctx, id),
+    listTasks(ctx, { shipmentId: id }),
+    listTrackings(ctx, id),
+  ]);
   const canWrite = can(ctx.role, "shipments:write");
+  const tracking = trackingConfigured();
+  // Pull fresh carrier data after the response when it is stale; the next view shows it.
+  if (tracking && trackings.some((t) => t.state === "active" || t.state === "pending" || t.state === "failed")) after(() => refreshDueTrackings(ctx, id));
   const canUpload = can(ctx.role, "documents:upload");
 
   return (
@@ -114,22 +127,32 @@ export default async function ShipmentPage({ params, searchParams }: { params: P
             )}
           </Card>
 
+          <TrackingCard
+            shipmentId={s.id}
+            trackings={trackings}
+            configured={tracking}
+            canWrite={canWrite}
+            containerNumber={s.containerNumber}
+            billOfLadingNumber={s.billOfLadingNumber}
+          />
+
           <Card>
-            <CardHeader title="Timeline" description="Manual entries and system activity. Carrier tracking is not connected." />
+            <CardHeader title="Timeline" description="Manual entries, system activity and carrier milestones from live tracking." />
             {events.length === 0 ? (
               <EmptyState title="No events" />
             ) : (
               <ol className="relative space-y-5 px-5 py-5">
                 {events.map((e) => (
                   <li key={e.id} className="relative flex gap-4">
-                    <span className={`mt-1.5 size-2.5 shrink-0 rounded-full ring-4 ring-surface ${e.source === "system" ? "bg-faint" : "bg-accent"}`} />
+                    <span className={`mt-1.5 size-2.5 shrink-0 rounded-full ring-4 ring-surface ${e.source === "manual" ? "bg-accent" : e.source === "system" || e.isActual === false ? "bg-faint" : "bg-ok"}`} />
                     <div className="min-w-0">
                       <p className="text-sm text-ink">{e.description}</p>
                       <p className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted">
                         <span>{formatDateTime(e.occurredAt)}</span>
                         {e.location && <span>· {e.location}</span>}
                         {e.actor && <span>· {e.actor}</span>}
-                        <Badge tone={e.source === "manual" ? "accent" : "neutral"}>{e.source === "manual" ? "Manual entry" : "System"}</Badge>
+                        <SourceBadge source={e.source} />
+                        {e.isActual === false && <Badge tone="neutral">Planned</Badge>}
                       </p>
                     </div>
                   </li>
@@ -153,7 +176,7 @@ export default async function ShipmentPage({ params, searchParams }: { params: P
           <Card>
             <CardHeader title="Customs & tracking" />
             <div className="space-y-3 p-5 text-sm text-muted">
-              <p>Live container tracking and tariff data are not connected in this phase. Nothing on this page is generated from carrier or customs systems.</p>
+              <p>Carrier milestones come only from the connected tracking provider and are labelled with their source. Tariff and customs data are not connected; nothing on this page is generated from customs systems.</p>
               <p>Classification and declaration decisions remain with your licensed customs broker.</p>
             </div>
           </Card>
@@ -161,4 +184,11 @@ export default async function ShipmentPage({ params, searchParams }: { params: P
       </div>
     </>
   );
+}
+
+function SourceBadge({ source }: { source: string }) {
+  if (source === "manual") return <Badge tone="accent">Manual entry</Badge>;
+  if (source === "system") return <Badge tone="neutral">System</Badge>;
+  const label = KNOWN_TRACKING_PROVIDERS.find((p) => p.id === source)?.label ?? source;
+  return <Badge tone="ok">Carrier · {label}</Badge>;
 }

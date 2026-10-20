@@ -196,9 +196,35 @@ for processing.
   scanned before storage; infected files are refused and audited; if a configured scanner
   is unreachable the upload fails closed (HTTP 503). Each document shows its scan result.
 
+## Phase 4 — Live container tracking
+
+- **Provider-neutral layer** (`src/lib/tracking`): every provider maps into one snapshot
+  shape. Traqo is implemented (170+ lines per the provider); Vizion, SeaRates, Terminal49
+  and Maersk DCSA are listed and plug in as adapters once keys exist. `TRACKING_PROVIDERS`
+  sets the order; the first provider that recognises a reference wins.
+- **On a shipment**, enter a container or B/L (prefilled from the shipment) and optionally
+  the carrier SCAC (recommended on Traqo's free plan, which has no auto-discovery). The page
+  shows carrier status, ETA/ATA, vessel, route and last reported position on a map.
+- **Timeline**: carrier milestones are de-duplicated by the provider's event id and badged
+  "Carrier · Traqo"; planned (estimated) milestones are marked "Planned".
+- **ETA**: the shipment ETA follows the carrier; a slip of 1+ day raises a warning alert,
+  3+ days a critical one.
+- **Status** only moves forward on proven data (in transit, at port, delivered). Customs
+  states are never set or skipped by carrier data, except a verified delivery.
+- **Freshness**: opening a shipment refreshes references not checked for 2h (after the
+  response). `POST /api/webhooks/traqo` (HMAC-verified with `TRAQO_WEBHOOK_SECRET`,
+  de-duplicated by `X-Traqo-Delivery`) re-reads the provider on push; the payload itself is
+  never stored. `POST /api/cron/tracking` with `Authorization: Bearer $CRON_SECRET`
+  refreshes stale references (50 per run).
+- **Limits**: plan `monthly_tracking_limit` (Trial 5, Growth 200, Enterprise unlimited) is
+  checked before any provider call; 30 starts and 120 manual refreshes per org per hour.
+- **No fake data**: provider demo/sandbox responses are refused in production.
+- `node e2e/tracking.mjs` walks through the flow against Traqo's sandbox.
+
 ## Known limitations
 
-- Tracking, tariff, WhatsApp and billing providers are interfaces only (`docs/INTEGRATIONS.md`).
+- Tariff, WhatsApp and billing providers are interfaces only (`docs/INTEGRATIONS.md`). Tracking adapters other than Traqo are not built yet.
+- Map tiles default to OpenStreetMap's public servers, which are meant for light use; set `NEXT_PUBLIC_MAP_TILE_URL` to a commercial tile service before heavy use.
 - After verifying their email a user must sign in again for the new status to apply.
 - Malware scanning needs a ClamAV service; documents uploaded while it is not configured are marked "not scanned".
 - Invitation emails need a verified sending domain in Resend.

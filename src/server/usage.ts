@@ -2,18 +2,20 @@ import "server-only";
 import type { Tx, TenantContext } from "@/lib/db";
 import { LimitExceededError } from "@/lib/errors";
 
-type Metric = "shipment_created" | "document_uploaded" | "storage_bytes";
+type Metric = "shipment_created" | "document_uploaded" | "storage_bytes" | "tracking_started";
 
 const LIMIT_COLUMN: Record<Metric, string> = {
   shipment_created: "monthly_shipment_limit",
   document_uploaded: "monthly_document_limit",
   storage_bytes: "storage_limit_bytes",
+  tracking_started: "monthly_tracking_limit",
 };
 
 const LIMIT_MESSAGE: Record<Metric, string> = {
   shipment_created: "Your plan's monthly shipment limit has been reached.",
   document_uploaded: "Your plan's monthly document limit has been reached.",
   storage_bytes: "Your plan's storage limit has been reached.",
+  tracking_started: "Your plan's monthly live-tracking limit has been reached.",
 };
 
 /** Enforce the plan limit for `metric` before adding `quantity` to it. */
@@ -46,11 +48,12 @@ export async function recordUsage(tx: Tx, ctx: TenantContext, metric: Metric, qu
 
 export async function usageSummary(tx: Tx, ctx: TenantContext) {
   const { rows } = await tx.query(
-    `SELECT p.key, p.name, p.monthly_shipment_limit, p.monthly_document_limit, p.storage_limit_bytes, p.seat_limit,
+    `SELECT p.key, p.name, p.monthly_shipment_limit, p.monthly_document_limit, p.storage_limit_bytes, p.seat_limit, p.monthly_tracking_limit,
             s.status, s.current_period_start, s.current_period_end,
             (SELECT COALESCE(SUM(quantity),0) FROM usage_records u WHERE u.org_id = s.org_id AND u.metric = 'shipment_created' AND u.occurred_at >= s.current_period_start)::bigint AS shipments,
             (SELECT COALESCE(SUM(quantity),0) FROM usage_records u WHERE u.org_id = s.org_id AND u.metric = 'document_uploaded' AND u.occurred_at >= s.current_period_start)::bigint AS documents,
             (SELECT COALESCE(SUM(quantity),0) FROM usage_records u WHERE u.org_id = s.org_id AND u.metric = 'storage_bytes')::bigint AS storage,
+            (SELECT COALESCE(SUM(quantity),0) FROM usage_records u WHERE u.org_id = s.org_id AND u.metric = 'tracking_started' AND u.occurred_at >= s.current_period_start)::bigint AS trackings,
             (SELECT count(*) FROM organization_memberships m WHERE m.org_id = s.org_id)::int AS seats
        FROM subscriptions s JOIN subscription_plans p ON p.id = s.plan_id
       WHERE s.org_id = $1`,
@@ -67,6 +70,7 @@ export async function usageSummary(tx: Tx, ctx: TenantContext) {
     shipments: { used: Number(r.shipments), limit: r.monthly_shipment_limit as number | null },
     documents: { used: Number(r.documents), limit: r.monthly_document_limit as number | null },
     storage: { used: Number(r.storage), limit: r.storage_limit_bytes === null ? null : Number(r.storage_limit_bytes) },
+    trackings: { used: Number(r.trackings), limit: r.monthly_tracking_limit as number | null },
     seats: { used: r.seats as number, limit: r.seat_limit as number | null },
   };
 }

@@ -5,6 +5,7 @@ import { requireTenant } from "@/lib/auth/session";
 import { extractionConfigured } from "@/lib/extraction/registry";
 import { formatBytes, formatDate } from "@/lib/format";
 import { integrationOverview } from "@/lib/integrations";
+import { trackingProviders } from "@/lib/tracking/registry";
 import { emailSender } from "@/lib/email";
 import { fileScanner } from "@/lib/scanning";
 import { storage } from "@/lib/storage";
@@ -34,7 +35,7 @@ export default async function SettingsPage() {
   const { ctx } = await requireTenant();
   const [org, types] = await Promise.all([getOrganization(ctx), listDocumentTypes(ctx)]);
   const canEdit = can(ctx.role, "org:update");
-  const integrations = integrationOverview(extractionConfigured(), emailSender().configured());
+  const integrations = integrationOverview(extractionConfigured(), emailSender().configured(), trackingProviders().map((p) => p.label));
   const scanner = fileScanner();
   const u = org.usage;
   const store = storage();
@@ -76,7 +77,7 @@ export default async function SettingsPage() {
 
           <Card>
             <div id="integrations" className="scroll-mt-20" />
-            <CardHeader title="Integrations" description="Providers are prepared as interfaces only. None send or receive data until configured and reviewed." />
+            <CardHeader title="Integrations" description="A provider sends or receives data only once it is configured. The rest are prepared as interfaces." />
             <ul className="divide-y divide-line">
               {integrations.map((i) => (
                 <li key={i.category} className="flex flex-col gap-2 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
@@ -104,6 +105,7 @@ export default async function SettingsPage() {
                 <Meter label="Shipments this period" used={u.shipments.used} limit={u.shipments.limit} />
                 <Meter label="Documents this period" used={u.documents.used} limit={u.documents.limit} />
                 <Meter label="Storage" used={u.storage.used} limit={u.storage.limit} format={formatBytes} />
+                <Meter label="Live trackings this period" used={u.trackings.used} limit={u.trackings.limit} />
                 <Meter label="Seats" used={u.seats.used} limit={u.seats.limit} />
                 <p className="text-xs text-faint">Billing is not connected yet; plan changes are made by the platform team.</p>
               </div>

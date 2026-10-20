@@ -1,5 +1,5 @@
 import "server-only";
-import type { Tx, TenantContext } from "./db";
+import type { Tx } from "./db";
 
 export type AuditAction =
   | "org.created"
@@ -26,13 +26,17 @@ export type AuditAction =
   | "document_type.created"
   | "task.created"
   | "task.completed"
-  | "upload.rejected";
+  | "upload.rejected"
+  | "tracking.started"
+  | "tracking.updated"
+  | "tracking.stopped"
+  | "tracking.failed";
 
 export type RequestMeta = { ip?: string | null; userAgent?: string | null };
 
 export async function audit(
   tx: Tx,
-  ctx: Pick<TenantContext, "orgId" | "userId">,
+  ctx: { orgId: string; userId: string | null },
   action: AuditAction,
   entity: { type: string; id?: string | null },
   metadata: Record<string, unknown> = {},
@@ -43,7 +47,7 @@ export async function audit(
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
     [
       ctx.orgId,
-      ctx.userId,
+      ctx.userId || null,
       action,
       entity.type,
       entity.id ?? null,
