@@ -14,6 +14,7 @@ const ICONS = {
   documents: "M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8l-5-5zm0 0v5h5M9 13h6M9 17h6",
   members: "M16 19v-1a4 4 0 00-4-4H6a4 4 0 00-4 4v1M9 10a3 3 0 100-6 3 3 0 000 6zm13 9v-1a4 4 0 00-3-3.87M16 4.13a3 3 0 010 5.74",
   audit: "M12 8v4l3 2M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
+  tracking: "M12 21s-7-6.2-7-11.5a7 7 0 0114 0C19 14.8 12 21 12 21zm0-9a2.5 2.5 0 100-5 2.5 2.5 0 000 5z",
   settings: "M12 15a3 3 0 100-6 3 3 0 000 6zM19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z",
 };
 
@@ -22,6 +23,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const items: NavItem[] = [
     { href: "/dashboard", label: "Dashboard", icon: ICONS.dashboard },
     { href: "/shipments", label: "Shipments", icon: ICONS.shipments },
+    { href: "/tracking", label: "Tracking", icon: ICONS.tracking },
     { href: "/documents", label: "Documents", icon: ICONS.documents },
     { href: "/settings/members", label: "Team", icon: ICONS.members },
     ...(can(ctx.role, "audit:read") ? [{ href: "/audit", label: "Audit history", icon: ICONS.audit }] : []),

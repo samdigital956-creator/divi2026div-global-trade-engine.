@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST as cronPOST } from "@/app/api/cron/tracking/route";
 import { POST as webhookPOST } from "@/app/api/webhooks/traqo/route";
 import { systemTx } from "@/lib/db";
+import { setEmailSenderForTesting, type EmailMessage } from "@/lib/email";
 import { ForbiddenError, LimitExceededError, NotFoundError, ValidationError } from "@/lib/errors";
 import { setTrackingProvidersForTesting } from "@/lib/tracking/registry";
 import { mapTraqoShipment, TraqoProvider } from "@/lib/tracking/traqo";
@@ -13,7 +14,7 @@ import type { ReferenceType, TrackingProvider, TrackOutcome } from "@/lib/tracki
 import { containerCheckDigit, containerNumberProblem } from "@/lib/tracking/container";
 import { verifyTraqoSignature } from "@/lib/tracking/webhook";
 import { createShipment, getShipment, listShipmentEvents } from "@/server/shipments";
-import { listTrackings, refreshTracking, startTracking, stopTracking, syncReference } from "@/server/tracking";
+import { listOrgTrackings, listTrackings, refreshTracking, startTracking, stopTracking, syncReference } from "@/server/tracking";
 import { addMember, makeOrg } from "./support/fixtures";
 
 // Route handlers defer work with after(); outside a Next request scope, run it right away.
@@ -294,3 +295,45 @@ describe("Traqo webhook and scheduled sync", () => {
   });
 });
 
+
+describe("tracking overview and delay emails", () => {
+  it("lists only the organization's trackings, delayed first, stopped hidden", async () => {
+    const a = await makeOrg();
+    const b = await makeOrg();
+    const s1 = await shipmentFor(a.ctx);
+    await startTracking(a.ctx, s1, { reference: box(111111) });
+    fake.next = (ref) => ({ status: "ok", snapshot: mapTraqoShipment(liveBody({ reference_number: ref, is_delayed: false }), "container") });
+    const { trackingId } = await startTracking(a.ctx, s1, { reference: box(222222) });
+    await startTracking(a.ctx, s1, { reference: box(333333) });
+    await stopTracking(a.ctx, trackingId);
+    await startTracking(b.ctx, await shipmentFor(b.ctx), { reference: box(444444) });
+
+    const rows = await listOrgTrackings(a.ctx);
+    expect(rows.map((r) => r.reference)).toEqual([box(111111), box(333333)]);
+    expect(rows[0]).toMatchObject({ isDelayed: true, shipmentId: s1 });
+    expect(rows[0].shipmentReference).toMatch(/^PO-/);
+    expect(await listOrgTrackings(a.ctx, { includeStopped: true })).toHaveLength(3);
+  });
+
+  it("emails owners and admins once per ETA slip, not members", async () => {
+    const sent: EmailMessage[] = [];
+    setEmailSenderForTesting({ id: "fake", configured: () => true, send: async (m: EmailMessage) => (sent.push(m), { providerId: "x" }) });
+    vi.stubEnv("APP_URL", "https://app.example.test/");
+    try {
+      const { org, ctx, owner } = await makeOrg("Delay Org");
+      const admin = await addMember(org.id, "admin");
+      await addMember(org.id, "member");
+      const id = await shipmentFor(ctx, { estimatedArrival: "2026-10-23" });
+      const { trackingId } = await startTracking(ctx, id, { reference: box(555555) });
+      expect(sent.map((m) => m.to).sort()).toEqual([owner.email, admin.user.email].sort());
+      expect(sent[0].subject).toMatch(/ETA delayed 1 day$/);
+      expect(sent[0].text).toContain("from 2026-10-23 to 2026-10-24");
+      expect(sent[0].text).toContain(`https://app.example.test/shipments/${id}`);
+
+      await refreshTracking(ctx, trackingId); // same ETA → no new email
+      expect(sent).toHaveLength(2);
+    } finally {
+      setEmailSenderForTesting(null);
+    }
+  });
+});

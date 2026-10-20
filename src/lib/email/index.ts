@@ -88,3 +88,32 @@ export function invitationEmail(opts: { orgName: string; inviterName: string; ro
 </body></html>`;
   return { subject: `You're invited to join ${opts.orgName}`, text, html };
 }
+
+export function etaDelayEmail(opts: {
+  orgName: string;
+  shipmentReference: string;
+  reference: string;
+  previousEta: string;
+  eta: string;
+  slipDays: number;
+  severity: "warning" | "critical";
+  url: string;
+}): Omit<EmailMessage, "to"> {
+  const days = `${opts.slipDays} day${opts.slipDays === 1 ? "" : "s"}`;
+  const subject = `${opts.severity === "critical" ? "[Critical] " : ""}${opts.shipmentReference}: ETA delayed ${days}`;
+  const text = [
+    `The carrier moved the ETA of ${opts.reference} (shipment ${opts.shipmentReference}, ${opts.orgName}) from ${opts.previousEta} to ${opts.eta} — ${days} later.`,
+    "",
+    `Open the shipment: ${opts.url}`,
+    "",
+    "ETAs are as reported by the carrier through the tracking provider and can change again.",
+    "You receive this email as an owner or admin of the organization.",
+  ].join("\n");
+  const e = escapeHtml;
+  const html = `<!doctype html><html><body style="font-family:-apple-system,Segoe UI,Arial,sans-serif;color:#0d1628;line-height:1.5">
+<p>The carrier moved the ETA of <strong>${e(opts.reference)}</strong> (shipment <strong>${e(opts.shipmentReference)}</strong>, ${e(opts.orgName)}) from <strong>${e(opts.previousEta)}</strong> to <strong>${e(opts.eta)}</strong> — ${e(days)} later.</p>
+<p><a href="${e(opts.url)}">Open the shipment</a></p>
+<p style="color:#5b6a86;font-size:13px">ETAs are as reported by the carrier through the tracking provider and can change again. You receive this email as an owner or admin of the organization.</p>
+</body></html>`;
+  return { subject, text, html };
+}

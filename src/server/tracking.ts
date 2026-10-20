@@ -1,6 +1,7 @@
 import "server-only";
 import { z } from "zod";
 import { audit, type RequestMeta } from "@/lib/audit";
+import { etaDelayEmail, sendEmail } from "@/lib/email";
 import { assertCan } from "@/lib/authz";
 import { systemTx, withTenant, type TenantContext, type Tx } from "@/lib/db";
 import { AppError, ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
@@ -75,6 +76,24 @@ export async function listTrackings(ctx: TenantContext, shipmentId: string): Pro
   });
 }
 
+export type TrackingOverviewRow = Tracking & { shipmentReference: string; shipmentStatus: string };
+
+/** Every active or finished tracking in the organization, most urgent first (delayed, then soonest ETA). */
+export async function listOrgTrackings(ctx: TenantContext, opts: { includeStopped?: boolean } = {}): Promise<TrackingOverviewRow[]> {
+  assertCan(ctx.role, "shipments:read");
+  return withTenant(ctx, async (tx) => {
+    const { rows } = await tx.query(
+      `SELECT t.*, s.reference AS shipment_reference, s.status AS shipment_status
+         FROM container_trackings t JOIN shipments s ON s.id = t.shipment_id
+        WHERE ($1 OR t.state <> 'stopped')
+        ORDER BY (t.state = 'delivered'), t.is_delayed DESC, t.eta NULLS LAST, t.created_at DESC
+        LIMIT 500`,
+      [!!opts.includeStopped],
+    );
+    return rows.map((r) => ({ ...mapRow(r), shipmentReference: r.shipment_reference, shipmentStatus: r.shipment_status }));
+  });
+}
+
 export const startTrackingSchema = z.object({
   reference: z
     .string()
@@ -136,7 +155,8 @@ export async function startTracking(ctx: TenantContext, shipmentId: string, inpu
     if (outcome.status === "ok" || outcome.status === "limit_reached") break;
   }
 
-  return withTenant(ctx, async (tx) => {
+  let delay: DelayNotice | null = null;
+  const result = await withTenant(ctx, async (tx) => {
     const { rows } = await tx.query(
       `INSERT INTO container_trackings (org_id, shipment_id, provider, reference, reference_type, sealine, state, last_error, last_checked_at, created_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now(),$9)
@@ -153,7 +173,7 @@ export async function startTracking(ctx: TenantContext, shipmentId: string, inpu
     );
     const row = rows[0];
     if (outcome.status === "ok") {
-      await applySnapshot(tx, ctx, row, outcome.snapshot, meta);
+      delay = await applySnapshot(tx, ctx, row, outcome.snapshot, meta);
       await recordUsage(tx, ctx, "tracking_started", 1, row.id);
       await audit(tx, ctx, "tracking.started", { type: "shipment", id: shipmentId }, { reference, provider: providerId, carrier: outcome.snapshot.sealine }, meta);
     } else {
@@ -161,6 +181,8 @@ export async function startTracking(ctx: TenantContext, shipmentId: string, inpu
     }
     return { trackingId: row.id as string, outcome: outcome.status, message: outcome.status === "ok" ? null : outcome.message };
   });
+  await notifyDelay(ctx, delay);
+  return result;
 }
 
 const STATUS_RANK = ["draft", "booked", "in_transit", "at_port", "customs_review", "cleared", "delivered"] as const;
@@ -186,7 +208,8 @@ async function applySnapshot(
   row: any,
   s: TrackingSnapshot,
   meta: RequestMeta = {},
-) {
+): Promise<DelayNotice | null> {
+  let delay: DelayNotice | null = null;
   const prevEta: Date | null = row.eta;
   const newEta = s.eta ? new Date(s.eta) : null;
   const state = s.deliveredAt ? "delivered" : "active";
@@ -232,6 +255,16 @@ async function applySnapshot(
         `INSERT INTO alerts (org_id, shipment_id, severity, kind, message) VALUES ($1, $2, $3, 'eta_delay', $4)`,
         [ctx.orgId, row.shipment_id, slip >= 3 ? "critical" : "warning", `${shipment.reference}: ETA slipped ${slip} day${slip === 1 ? "" : "s"} to ${fmtDay(newEta)} (${row.reference})`],
       );
+      delay = {
+        trackingId: row.id,
+        shipmentId: row.shipment_id,
+        shipmentReference: shipment.reference,
+        reference: row.reference,
+        previousEta: fmtDay(baseline!),
+        eta: fmtDay(newEta),
+        slipDays: slip,
+        severity: slip >= 3 ? "critical" : "warning",
+      };
     }
   }
 
@@ -248,6 +281,40 @@ async function applySnapshot(
     }
   }
   await audit(tx, ctx, "tracking.updated", { type: "shipment", id: row.shipment_id }, { reference: row.reference, provider: s.provider, newEvents: added, eta: s.eta, status: s.carrierStatus }, meta);
+  return delay;
+}
+
+type DelayNotice = {
+  trackingId: string;
+  shipmentId: string;
+  shipmentReference: string;
+  reference: string;
+  previousEta: string;
+  eta: string;
+  slipDays: number;
+  severity: "warning" | "critical";
+};
+
+/** Email owners and admins about an ETA slip. Best-effort: runs after the data is committed and never throws. */
+async function notifyDelay(ctx: { orgId: string; userId: string }, d: DelayNotice | null) {
+  if (!d) return;
+  try {
+    const { orgName, emails } = await withTenant(ctx, async (tx) => {
+      const org = await tx.query(`SELECT name FROM organizations WHERE id = $1`, [ctx.orgId]);
+      const r = await tx.query(
+        `SELECT u.email FROM organization_memberships m JOIN users u ON u.id = m.user_id WHERE m.role IN ('owner', 'admin') ORDER BY u.email`,
+      );
+      return { orgName: org.rows[0]?.name as string, emails: r.rows.map((x) => String(x.email)) };
+    });
+    const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
+    if (!appUrl) return;
+    const msg = etaDelayEmail({ ...d, orgName, url: `${appUrl}/shipments/${d.shipmentId}` });
+    for (const to of emails.slice(0, 20)) {
+      await sendEmail({ ...msg, to, idempotencyKey: `eta-delay:${d.trackingId}:${d.eta}:${to}` });
+    }
+  } catch {
+    // Alert is already on the dashboard; email is a courtesy.
+  }
 }
 
 async function refreshRow(ctx: SyncContext, trackingId: string, meta: RequestMeta = {}) {
@@ -257,9 +324,10 @@ async function refreshRow(ctx: SyncContext, trackingId: string, meta: RequestMet
   const provider = trackingProvider(row.provider);
   if (!provider) throw new AppError("This tracking provider is not configured.", 503, "tracking_not_configured");
   const outcome = row.state === "active" || row.state === "delivered" ? await provider.refresh(row.reference, row.reference_type) : await provider.track(row.reference, row.reference_type, row.sealine);
+  let delay: DelayNotice | null = null;
   await withTenant(ctx, async (tx) => {
     if (outcome.status === "ok" && !rejectSynthetic(outcome.snapshot)) {
-      await applySnapshot(tx, ctx, row, outcome.snapshot, meta);
+      delay = await applySnapshot(tx, ctx, row, outcome.snapshot, meta);
     } else {
       const msg = outcome.status === "ok" ? "Provider returned demo data." : outcome.message;
       await tx.query(
@@ -270,6 +338,7 @@ async function refreshRow(ctx: SyncContext, trackingId: string, meta: RequestMet
       );
     }
   });
+  await notifyDelay(ctx, delay);
   return outcome.status;
 }
 

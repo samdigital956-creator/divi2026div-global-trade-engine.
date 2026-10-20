@@ -219,7 +219,14 @@ for processing.
 - **Limits**: plan `monthly_tracking_limit` (Trial 5, Growth 200, Enterprise unlimited) is
   checked before any provider call; 30 starts and 120 manual refreshes per org per hour.
 - **No fake data**: provider demo/sandbox responses are refused in production.
+- **Tracking page** (`/tracking`): every tracked reference with status, ETA and vessel, a
+  map of last positions (delayed ones in amber), and counts for live / delayed / arriving
+  within 7 days / needing attention.
+- **Delay emails**: an ETA slip emails the organization's owners and admins (once per new ETA).
+- **Scheduled sync** runs as the Railway service `tracking-cron` (`curlimages/curl`, cron
+  `17 */3 * * *`) calling `/api/cron/tracking` with `CRON_SECRET`.
 - `node e2e/tracking.mjs` walks through the flow against Traqo's sandbox.
+- Open items are tracked in `docs/ROADMAP.md`.
 
 ## Known limitations
 

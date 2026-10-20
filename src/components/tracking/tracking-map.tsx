@@ -43,3 +43,37 @@ export function TrackingMap({ position, route, label }: { position: { lat: numbe
 
   return <div ref={el} className="tracking-map h-64 w-full overflow-hidden rounded-lg border border-line bg-bg" role="img" aria-label={`Map: ${label}`} />;
 }
+
+type FleetMarker = { id: string; lat: number; lng: number; label: string; delayed: boolean; href: string };
+
+/** Every tracked box's last reported position. Clicking a marker opens its shipment. */
+export function FleetMap({ markers }: { markers: FleetMarker[] }) {
+  const el = useRef<HTMLDivElement>(null);
+  const key = JSON.stringify(markers);
+
+  useEffect(() => {
+    let map: import("leaflet").Map | undefined;
+    let cancelled = false;
+    import("leaflet").then((L) => {
+      if (cancelled || !el.current) return;
+      map = L.map(el.current, { worldCopyJump: true, scrollWheelZoom: false });
+      L.tileLayer(TILE_URL, { maxZoom: 12, attribution: TILE_ATTRIBUTION }).addTo(map);
+      for (const m of markers) {
+        L.circleMarker([m.lat, m.lng], { radius: 6, color: "#e7ecf5", weight: 1.5, fillColor: m.delayed ? "#f2b84b" : "#4f8cff", fillOpacity: 1 })
+          .bindTooltip(m.label)
+          .on("click", () => window.location.assign(m.href))
+          .addTo(map);
+      }
+      if (markers.length > 1) map.fitBounds(markers.map((m) => [m.lat, m.lng] as [number, number]), { padding: [32, 32], maxZoom: 5 });
+      else if (markers.length === 1) map.setView([markers[0].lat, markers[0].lng], 4);
+      else map.setView([20, 0], 1);
+    });
+    return () => {
+      cancelled = true;
+      map?.remove();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  return <div ref={el} className="tracking-map h-80 w-full overflow-hidden rounded-lg border border-line bg-bg" role="img" aria-label={`Map of ${markers.length} tracked containers`} />;
+}
