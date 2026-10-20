@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ConfirmFieldButton, FieldsForm, RetryExtractionButton, ReviewPanel } from "@/components/forms/review-forms";
 import { DocumentStatusBadge, ExtractionBadge } from "@/components/status";
+import { AutoRefresh } from "@/components/auto-refresh";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, CardHeader, DescriptionList, Notice, PageHeader } from "@/components/ui/surface";
 import { can } from "@/lib/authz";
@@ -26,7 +27,10 @@ export default async function DocumentReviewPage({ params, searchParams }: { par
   const fileUrl = `/api/documents/${doc.id}/file`;
   const isPdf = doc.mimeType === "application/pdf";
   const isBrowserImage = doc.mimeType === "image/png" || doc.mimeType === "image/jpeg";
-  const canRetry = editable && extractionConfigured() && doc.extractionStatus !== "processing";
+  // A job that never reported back (e.g. the server restarted) can be retried after a few minutes.
+  // eslint-disable-next-line react-hooks/purity -- request-time check in a server component
+  const stuck = doc.extractionStatus === "processing" && Date.now() - new Date(doc.updatedAt).getTime() > 4 * 60_000;
+  const canRetry = editable && extractionConfigured() && (doc.extractionStatus !== "processing" || stuck);
 
   return (
     <>
@@ -52,6 +56,14 @@ export default async function DocumentReviewPage({ params, searchParams }: { par
       />
 
       {sp.uploaded && <Notice tone="success" className="mb-4" title="Uploaded securely">The file passed type and content checks and is stored privately.</Notice>}
+      {doc.extractionStatus === "processing" && (
+        <Notice tone="info" className="mb-4" title={stuck ? "AI reading is taking too long" : "AI is reading this document…"}>
+          {stuck
+            ? "The extraction did not report back. Try again, or enter values manually."
+            : "This usually takes under a minute. The values below will fill in automatically."}
+          {stuck ? canRetry && <RetryExtractionButton documentId={doc.id} label="Try again" /> : <AutoRefresh />}
+        </Notice>
+      )}
       {doc.extractionStatus === "not_configured" && (
         <Notice tone="info" className="mb-4" title="AI extraction not configured">
           {extractionConfigured()
@@ -118,7 +130,7 @@ export default async function DocumentReviewPage({ params, searchParams }: { par
           <Card>
             <CardHeader title="Document values" description={editable ? "Edit any value; values you type are recorded as entered by you." : undefined} />
             <div className="p-5">
-              <FieldsForm documentId={doc.id} fields={doc.fields} values={doc.values} editable={editable} lowConfidence={LOW_CONFIDENCE} />
+              <FieldsForm key={doc.extractionStatus} documentId={doc.id} fields={doc.fields} values={doc.values} editable={editable} lowConfidence={LOW_CONFIDENCE} />
             </div>
           </Card>
 

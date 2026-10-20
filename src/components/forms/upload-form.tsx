@@ -158,7 +158,7 @@ export function UploadForm({
           <div className="h-1.5 overflow-hidden rounded-full bg-line">
             <div className="h-full bg-accent transition-all" style={{ width: `${progress}%` }} />
           </div>
-          <p className="text-xs text-muted">{progress! < 100 ? `Uploading… ${progress}%` : "Verifying, storing securely and reading with AI…"}</p>
+          <p className="text-xs text-muted">{progress! < 100 ? `Uploading… ${progress}%` : "Verifying and storing securely…"}</p>
         </div>
       )}
 

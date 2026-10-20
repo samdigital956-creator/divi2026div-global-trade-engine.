@@ -112,4 +112,34 @@ describe("registry with Gemini", () => {
     expect(doc.values.invoice_number).toMatchObject({ value: "TYPED-BY-HUMAN", source: "manual" });
     expect(doc.values.currency).toMatchObject({ value: "USD", source: "ai", requiresConfirmation: true });
   });
+
+  it("background mode marks the document as processing, then completes", async () => {
+    setExtractionProvidersForTesting({
+      ai: { id: "gemini", label: "t", status: () => ({ configured: true }), extractFields: async () => [{ key: "currency", value: "EUR", confidence: 0.8 }] },
+    });
+    const o = await makeOrg();
+    const sid = await createShipment(o.ctx, { reference: "BG-1", transportMode: "air" });
+    const type = (await listDocumentTypes(o.ctx)).find((t) => t.key === "commercial_invoice")!;
+    const jobs: (() => Promise<void>)[] = [];
+    const id = await uploadDocument(o.ctx, { shipmentId: sid, documentTypeId: type.id, filename: "i.pdf", bytes: PDF_BYTES }, {}, { defer: (j) => jobs.push(j) });
+    expect((await getDocument(o.ctx, id)).extractionStatus).toBe("processing");
+    expect(jobs).toHaveLength(1);
+    await jobs[0]();
+    const doc = await getDocument(o.ctx, id);
+    expect(doc).toMatchObject({ extractionStatus: "completed", status: "needs_review" });
+    expect(doc.values.currency).toMatchObject({ value: "EUR", requiresConfirmation: true });
+  });
+
+  it("background failures leave the document reviewable instead of stuck", async () => {
+    setExtractionProvidersForTesting({
+      ai: { id: "gemini", label: "t", status: () => ({ configured: true }), extractFields: async () => { throw new Error("timeout"); } },
+    });
+    const o = await makeOrg();
+    const sid = await createShipment(o.ctx, { reference: "BG-2", transportMode: "air" });
+    const type = (await listDocumentTypes(o.ctx)).find((t) => t.key === "other")!;
+    const jobs: (() => Promise<void>)[] = [];
+    const id = await uploadDocument(o.ctx, { shipmentId: sid, documentTypeId: type.id, filename: "o.pdf", bytes: PDF_BYTES }, {}, { defer: (j) => jobs.push(j) });
+    await jobs[0]();
+    expect(await getDocument(o.ctx, id)).toMatchObject({ extractionStatus: "failed", status: "needs_review" });
+  });
 });

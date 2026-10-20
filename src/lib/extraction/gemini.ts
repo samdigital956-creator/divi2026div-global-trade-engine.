@@ -12,7 +12,9 @@ import type { AiExtractionProvider, ExtractionInput, FieldCandidate, ProviderSta
  */
 const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/interactions";
 const DEFAULT_MODEL = "gemini-3.8-flash";
-const TIMEOUT_MS = 90_000;
+const TIMEOUT_MS = 150_000;
+// Field capture needs little reasoning; "low" keeps latency down on 3.x Flash models.
+const THINKING_LEVEL = process.env.GEMINI_THINKING_LEVEL || "low";
 
 const INPUT_TYPE: Record<string, "document" | "image"> = {
   "application/pdf": "document",
@@ -54,6 +56,7 @@ export class GeminiExtractionProvider implements AiExtractionProvider {
           { type: inputType, data: Buffer.from(input.bytes).toString("base64"), mime_type: input.mimeType },
           { type: "text", text: buildPrompt(input) },
         ],
+        generation_config: { thinking_level: THINKING_LEVEL },
         response_format: {
           type: "text",
           mime_type: "application/json",

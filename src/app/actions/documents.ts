@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { requestMeta, tenantForAction } from "@/lib/auth/session";
 import { approveDocument, confirmField, rejectDocument, reopenDocument, retryExtraction, saveDocumentFields } from "@/server/documents";
 import type { FormState } from "./form-state";
@@ -37,9 +38,9 @@ export async function retryExtractionAction(_: FormState, form: FormData): Promi
   const id = String(form.get("documentId") ?? "");
   return handle(async () => {
     const { ctx } = await tenantForAction();
-    await retryExtraction(ctx, id, await requestMeta());
+    await retryExtraction(ctx, id, await requestMeta(), { defer: after });
     revalidatePath(`/documents/${id}`);
-    return { ok: true, message: "AI extraction finished. Check and confirm each value." };
+    return { ok: true, message: "AI is reading the document…" };
   });
 }
 

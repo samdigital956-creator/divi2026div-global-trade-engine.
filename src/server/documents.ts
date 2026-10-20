@@ -5,7 +5,7 @@ import { audit, type RequestMeta } from "@/lib/audit";
 import { assertCan } from "@/lib/authz";
 import { withTenant, type TenantContext, type Tx } from "@/lib/db";
 import { AppError, ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
-import { runExtraction } from "@/lib/extraction/registry";
+import { extractionConfigured, runExtraction } from "@/lib/extraction/registry";
 import type { FieldDefinition } from "@/lib/extraction/types";
 import { storage, storageKeyFor } from "@/lib/storage";
 import { validateUpload } from "@/lib/uploads";
@@ -171,7 +171,35 @@ export async function listDocuments(ctx: TenantContext, opts: { shipmentId?: str
 
 export type UploadInput = { shipmentId: string; documentTypeId: string; filename: string; bytes: Uint8Array };
 
-export async function uploadDocument(ctx: TenantContext, input: UploadInput, meta: RequestMeta = {}) {
+/**
+ * How AI extraction is run. By default it is awaited (tests, scripts). Request
+ * handlers pass Next's `after` so the response returns immediately and the
+ * review page shows "processing" until the provider finishes.
+ */
+export type ExtractionScheduling = { defer?: (job: () => Promise<void>) => void };
+
+async function scheduleExtraction(ctx: TenantContext, documentId: string, job: () => Promise<void>, opts: ExtractionScheduling) {
+  if (!opts.defer || !extractionConfigured()) return job();
+  await withTenant(ctx, (tx) =>
+    tx.query(`UPDATE shipment_documents SET extraction_status = 'processing', extraction_error = NULL WHERE id = $1`, [documentId]),
+  );
+  opts.defer(async () => {
+    try {
+      await job();
+    } catch (err) {
+      console.error("[extraction] background job failed:", err instanceof Error ? err.message : "unknown");
+      await withTenant(ctx, (tx) =>
+        tx.query(
+          `UPDATE shipment_documents SET status = 'needs_review', extraction_status = 'failed',
+             extraction_error = 'Extraction did not finish. Try again or enter values manually.' WHERE id = $1`,
+          [documentId],
+        ),
+      ).catch(() => {});
+    }
+  });
+}
+
+export async function uploadDocument(ctx: TenantContext, input: UploadInput, meta: RequestMeta = {}, opts: ExtractionScheduling = {}) {
   assertCan(ctx.role, "documents:upload");
   if (!uuid.safeParse(input.shipmentId).success) throw new ValidationError("Choose a shipment.", { shipmentId: "Choose a shipment." });
   if (!uuid.safeParse(input.documentTypeId).success) throw new ValidationError("Choose a document type.", { documentTypeId: "Choose a document type." });
@@ -242,7 +270,7 @@ export async function uploadDocument(ctx: TenantContext, input: UploadInput, met
     throw err;
   }
 
-  await extract(ctx, documentId, docType.key, docType.fields, file.mime, input.bytes, meta);
+  await scheduleExtraction(ctx, documentId, () => extract(ctx, documentId, docType.key, docType.fields, file.mime, input.bytes, meta), opts);
   return documentId;
 }
 
@@ -288,7 +316,7 @@ async function extract(
 }
 
 /** Re-run AI extraction on a stored document. Values a person entered are never overwritten. */
-export async function retryExtraction(ctx: TenantContext, id: string, meta: RequestMeta = {}) {
+export async function retryExtraction(ctx: TenantContext, id: string, meta: RequestMeta = {}, opts: ExtractionScheduling = {}) {
   assertCan(ctx.role, "documents:edit_fields");
   assertUuid(id, "Document");
   const store = storage();
@@ -303,8 +331,10 @@ export async function retryExtraction(ctx: TenantContext, id: string, meta: Requ
     if (rows[0].status === "approved") throw new ConflictError("Approved documents are locked. Reopen the document first.");
     return rows[0];
   });
-  const bytes = await store.get(d.storage_key);
-  await extract(ctx, id, d.type_key, d.field_schema, d.mime_type, bytes, meta);
+  await scheduleExtraction(ctx, id, async () => {
+    const bytes = await store.get(d.storage_key);
+    await extract(ctx, id, d.type_key, d.field_schema, d.mime_type, bytes, meta);
+  }, opts);
 }
 
 export type DocumentDetail = DocumentSummary & {
@@ -318,6 +348,7 @@ export type DocumentDetail = DocumentSummary & {
   reviewNote: string | null;
   reviewedBy: string | null;
   reviewedAt: Date | null;
+  updatedAt: Date;
 };
 
 async function loadDetail(tx: Tx, id: string): Promise<DocumentDetail> {
@@ -364,6 +395,7 @@ async function loadDetail(tx: Tx, id: string): Promise<DocumentDetail> {
     reviewNote: d.review_note,
     reviewedBy: d.reviewed_by_name,
     reviewedAt: d.reviewed_at,
+    updatedAt: d.updated_at,
   };
 }
 

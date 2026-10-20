@@ -1,4 +1,4 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { after, NextResponse, type NextRequest } from "next/server";
 import { assertSameOrigin, metaFromRequest, tenantFromRequest } from "@/lib/auth/session";
 import { ValidationError } from "@/lib/errors";
 import { jsonError } from "@/lib/http";
@@ -30,6 +30,7 @@ export async function POST(req: NextRequest) {
         bytes: new Uint8Array(await file.arrayBuffer()),
       },
       metaFromRequest(req),
+      { defer: after },
     );
     return NextResponse.json({ id }, { status: 201 });
   } catch (err) {
